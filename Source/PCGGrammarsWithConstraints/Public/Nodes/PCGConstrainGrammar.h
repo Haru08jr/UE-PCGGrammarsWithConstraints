@@ -6,9 +6,12 @@
 #include "PCGSettings.h"
 #include "Elements/PCGSplitPoints.h"
 #include "Elements/Grammar/PCGSubdivisionBase.h"
+#include "Metadata/PCGMetadata.h"
+#include "Metadata/PCGMetadataAttributeTpl.h"
 
 #include "PCGConstrainGrammar.generated.h"
 
+class UPCGSplineData;
 class UPCGPolyLineData;
 
 USTRUCT(BlueprintType)
@@ -107,7 +110,9 @@ public:
 	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Settings|Grammar", meta = (ShowOnlyInnerProperties, PCG_Overridable))
 	FPCGGrammarSelection GrammarSelection;
 	
-	// Grammar Output Attribute Name
+	/** Name of the grammar output attribute. */
+	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Settings|Output", meta = (PCG_Overridable))
+	FName GrammarAttributeName = TEXT("Grammar");
 	
 };
 
@@ -118,10 +123,9 @@ protected:
 	
 	FString ConstrainGrammar(const FString& GrammarString, float Length, const PCGSubdivisionBase::FModuleInfoMap& Modules, const TArray<FPCGGrammarConstraint> Constraints) const;
 	
-	//float GetShapeLength(const FPCGContext* InContext) const;
 	float GetSegmentLength(const UPCGBasePointData* SegmentData, int SegmentIndex, EPCGSplitAxis SubdivisionAxis) const;
 	
-	// Access inputs
+	// Accessing inputs
 	
 	FString GetGrammarString(FPCGContext* InContext, const UPCGConstrainGrammarSettings* InSettings) const;
 	
@@ -133,5 +137,23 @@ protected:
 	PCGSubdivisionBase::FModuleInfoMap GetModulesInfoMap(FPCGContext* InContext, const TArray<FPCGSubdivisionSubmodule>& SubmodulesInfo, const UPCGParamData*& OutModuleInfoParamData) const;
 	PCGSubdivisionBase::FModuleInfoMap GetModulesInfoMap(FPCGContext* InContext, const FPCGSubdivisionModuleAttributeNames& InSubdivisionModuleAttributeNames, const UPCGParamData*& OutModuleInfoParamData) const;
 	
+private:
+	static UPCGSplineData* CopySplineDataToOutput(FPCGContext* InContext, FPCGTaggedData& OutputData, const UPCGSplineData* InSplineData);
 	
+	// Accessing & adding attributes
+	
+	template<typename T>
+	bool CreateAndValidateAttribute(FPCGContext* InContext, TObjectPtr<UPCGMetadata>& Metadata, const FName AttributeName, const T DefaultValue) const;
 };
+
+template <typename T>
+bool FPCGConstrainGrammarElement::CreateAndValidateAttribute(FPCGContext* InContext, TObjectPtr<UPCGMetadata>& Metadata, const FName AttributeName, const T DefaultValue) const
+{
+	auto OutAttribute = Metadata->FindOrCreateAttribute<T>(AttributeName, DefaultValue, false, true);
+	if (!OutAttribute)
+	{
+		PCGLog::Metadata::LogFailToCreateAttributeError<T>(AttributeName, InContext);
+		return false;
+	}
+	return true;
+}

@@ -57,7 +57,7 @@ TArray<FPCGPinProperties> UPCGConstrainGrammarSettings::OutputPinProperties() co
 	{
 		if (SubdivisionType == Spline)
 		{
-			PinProperties.Emplace(PCGPinConstants::DefaultOutputLabel, EPCGDataType::PolyLine, false, true);
+			PinProperties.Emplace(PCGPinConstants::DefaultOutputLabel, EPCGDataType::Spline, false, true);
 		}
 		else
 		{
@@ -106,24 +106,29 @@ bool FPCGConstrainGrammarElement::ExecuteInternal(FPCGContext* InContext) const
 		{
 			const TArray<FPCGTaggedData> SplineInputs = InContext->InputData.GetInputsByPin(PCGPinConstants::DefaultInputLabel);
 
-			for (auto SplineInput : SplineInputs)
+			for (const auto& SplineInput : SplineInputs)
 			{
-				const UPCGPolyLineData* SplineData = Cast<const UPCGPolyLineData>(SplineInput.Data);
+				const UPCGSplineData* SplineData = Cast<const UPCGSplineData>(SplineInput.Data);
+				
 				if (!Settings->bConstraintsAsInput)
 				{
-					auto ConstrainedSting = ConstrainGrammar(GrammarString, SplineData->GetLength(), ModulesInfo, Settings->Constraints);
-					//TODO add to output
+					auto ConstrainedString = ConstrainGrammar(GrammarString, SplineData->GetLength(), ModulesInfo, Settings->Constraints);
+					
+					auto OutSplineData = CopySplineDataToOutput(InContext, Outputs.Emplace_GetRef(), SplineData);
+					CreateAndValidateAttribute(InContext, OutSplineData->Metadata, Settings->GrammarAttributeName, ConstrainedString);
 				}
 				else
 				{
 					TArray<FPCGTaggedData> ConstraintInputs = InContext->InputData.GetInputsByPin(PCGConstrainGrammar::Constants::ConstraintsPinLabel);
-					for (auto ConstraintInput : ConstraintInputs)
+					for (const auto& ConstraintInput : ConstraintInputs)
 					{
 						const UPCGBasePointData* ConstraintPointData = Cast<const UPCGBasePointData>(ConstraintInput.Data);
 						auto Constraints = GetConstraintsOnSpline(SplineData, ConstraintPointData);
 
 						auto ConstrainedString = ConstrainGrammar(GrammarString, SplineData->GetLength(), ModulesInfo, Constraints);
-						//TODO add to output
+						
+						auto OutSplineData = CopySplineDataToOutput(InContext, Outputs.Emplace_GetRef(), SplineData);
+						CreateAndValidateAttribute(InContext, OutSplineData->Metadata, Settings->GrammarAttributeName, ConstrainedString);
 					}
 				}
 			}
@@ -168,7 +173,7 @@ bool FPCGConstrainGrammarElement::ExecuteInternal(FPCGContext* InContext) const
 		}
 	}
 
-	return false;
+	return true;
 }
 
 FString FPCGConstrainGrammarElement::ConstrainGrammar(const FString& GrammarString, float Length, const PCGSubdivisionBase::FModuleInfoMap& Modules,
@@ -212,38 +217,6 @@ TArray<FPCGGrammarConstraint> FPCGConstrainGrammarElement::GetConstraintsOnSegme
 {
 	return {};
 }
-
-/*
-float FPCGConstrainGrammarElement::GetShapeLength(const FPCGContext* InContext) const
-{
-	const UPCGConstrainGrammarSettings* Settings = InContext->GetInputSettings<UPCGConstrainGrammarSettings>();
-
-	if (!Settings->bShapeAsInput)
-		return Settings->Length;
-
-	const TArray<FPCGTaggedData> InputShapes = InContext->InputData.GetInputsByPin(PCGPinConstants::DefaultInputLabel);
-	if (!Settings->SubdivisionType == Spline)
-	{
-		const UPCGPolyLineData* InputSplineData = Cast<const UPCGPolyLineData>(InputShapes[0].Data);
-		return InputSplineData->GetLength();
-	}
-
-	if (!Settings->SubdivisionType == Segment)
-	{
-		const UPCGBasePointData* InputSegmentData = Cast<const UPCGBasePointData>(InputShapes[0].Data);
-		auto Bounds = InputSegmentData->GetBoundsMax(0) - InputSegmentData->GetBoundsMin(0);
-
-		switch (Settings->SubdivisionAxis)
-		{
-		case EPCGSplitAxis::X: return Bounds.X;
-		case EPCGSplitAxis::Y: return Bounds.Y;
-		case EPCGSplitAxis::Z: return Bounds.Z;
-		}
-	}
-
-	// TODO error message
-	return 0.0;
-}*/
 
 PCGSubdivisionBase::FModuleInfoMap FPCGConstrainGrammarElement::GetModulesInfoMap(FPCGContext* InContext, const UPCGConstrainGrammarSettings* InSettings,
                                                                                   const UPCGParamData*& OutModuleInfoParamData) const
@@ -328,4 +301,14 @@ PCGSubdivisionBase::FModuleInfoMap FPCGConstrainGrammarElement::GetModulesInfoMa
 	OutModuleInfoParamData = ParamData;
 
 	return ModulesInfo;
+}
+
+UPCGSplineData* FPCGConstrainGrammarElement::CopySplineDataToOutput(FPCGContext* InContext, FPCGTaggedData& OutputData, const UPCGSplineData* InSplineData)
+{
+	UPCGSplineData* CopiedSplineData = FPCGContext::NewObject_AnyThread<UPCGSplineData>(InContext);
+	CopiedSplineData->Initialize(InSplineData->SplineStruct);
+	CopiedSplineData->InitializeFromData(InSplineData);
+	OutputData.Data = CopiedSplineData;
+	
+	return CopiedSplineData;
 }
