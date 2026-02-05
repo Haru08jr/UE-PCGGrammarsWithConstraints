@@ -37,7 +37,8 @@ TArray<FPCGPinProperties> UPCGConstrainGrammarSettings::InputPinProperties() con
 
 	if (bModuleInfoAsInput)
 	{
-		FPCGPinProperties& ModuleInfoPin = PinProperties.Emplace_GetRef(PCGSubdivisionBase::Constants::ModulesInfoPinLabel, EPCGDataType::Param);
+		FPCGPinProperties& ModuleInfoPin = PinProperties.Emplace_GetRef(PCGSubdivisionBase::Constants::ModulesInfoPinLabel, EPCGDataType::Param,
+		                                                                false, true, FText::FromString("The Modules used in the Grammar."));
 		ModuleInfoPin.SetRequiredPin();
 	}
 
@@ -47,7 +48,23 @@ TArray<FPCGPinProperties> UPCGConstrainGrammarSettings::InputPinProperties() con
 TArray<FPCGPinProperties> UPCGConstrainGrammarSettings::OutputPinProperties() const
 {
 	TArray<FPCGPinProperties> PinProperties;
-	PinProperties.Emplace(TEXT("OutGrammar"), EPCGDataType::Param);
+
+	if (!bShapeAsInput)
+	{
+		PinProperties.Emplace(PCGConstrainGrammar::Constants::OutGrammarPinLabel, EPCGDataType::Param, false, false);
+	}
+	else
+	{
+		if (SubdivisionType == Spline)
+		{
+			PinProperties.Emplace(PCGPinConstants::DefaultOutputLabel, EPCGDataType::PolyLine, false, true);
+		}
+		else
+		{
+			PinProperties.Emplace(PCGPinConstants::DefaultOutputLabel, EPCGDataType::Point, false, true);
+		}
+	}
+
 	return PinProperties;
 }
 
@@ -68,21 +85,82 @@ bool FPCGConstrainGrammarElement::ExecuteInternal(FPCGContext* InContext) const
 	const UPCGParamData* ModuleInfoParamData = nullptr;
 	const PCGSubdivisionBase::FModuleInfoMap ModulesInfo = GetModulesInfoMap(InContext, Settings, ModuleInfoParamData);
 
+	FString GrammarString = GetGrammarString(InContext, Settings);
+
 	if (!Settings->bShapeAsInput)
 	{
-		auto ConstrainedSting = ConstrainGrammar(Settings->GrammarSelection.GrammarString, Settings->Length, ModulesInfo, Settings->Constraints);
+		auto ConstrainedSting = ConstrainGrammar(GrammarString, Settings->Length, ModulesInfo, Settings->Constraints);
 
-		// TODO output, I don't want to think about this now
+		// Construct output
+		UPCGParamData* OutputData = FPCGContext::NewObject_AnyThread<UPCGParamData>(InContext);
+		check(OutputData);
+
+		// TODO create attribute & add value
+
+		FPCGTaggedData& NewData = Outputs.Emplace_GetRef();
+		NewData.Data = OutputData;
 	}
 	else
 	{
 		if (Settings->SubdivisionType == Spline)
 		{
-			// TODO stuff
+			const TArray<FPCGTaggedData> SplineInputs = InContext->InputData.GetInputsByPin(PCGPinConstants::DefaultInputLabel);
+
+			for (auto SplineInput : SplineInputs)
+			{
+				const UPCGPolyLineData* SplineData = Cast<const UPCGPolyLineData>(SplineInput.Data);
+				if (!Settings->bConstraintsAsInput)
+				{
+					auto ConstrainedSting = ConstrainGrammar(GrammarString, SplineData->GetLength(), ModulesInfo, Settings->Constraints);
+					//TODO add to output
+				}
+				else
+				{
+					TArray<FPCGTaggedData> ConstraintInputs = InContext->InputData.GetInputsByPin(PCGConstrainGrammar::Constants::ConstraintsPinLabel);
+					for (auto ConstraintInput : ConstraintInputs)
+					{
+						const UPCGBasePointData* ConstraintPointData = Cast<const UPCGBasePointData>(ConstraintInput.Data);
+						auto Constraints = GetConstraintsOnSpline(SplineData, ConstraintPointData);
+
+						auto ConstrainedString = ConstrainGrammar(GrammarString, SplineData->GetLength(), ModulesInfo, Constraints);
+						//TODO add to output
+					}
+				}
+			}
 		}
 		else if (Settings->SubdivisionType == Segment)
 		{
-			// TODO stuff
+			const TArray<FPCGTaggedData> SegmentInputs = InContext->InputData.GetInputsByPin(PCGPinConstants::DefaultInputLabel);
+
+			for (auto SegmentInput : SegmentInputs)
+			{
+				const UPCGBasePointData* SegmentData = Cast<const UPCGBasePointData>(SegmentInput.Data);
+
+				if (!Settings->bConstraintsAsInput)
+				{
+					for (int i = 0; i < SegmentData->GetNumPoints(); ++i)
+					{
+						auto ConstrainedSting = ConstrainGrammar(GrammarString, GetSegmentLength(SegmentData, i, Settings->SubdivisionAxis), ModulesInfo, Settings->Constraints);
+					}
+
+					//TODO add to output
+				}
+				else
+				{
+					TArray<FPCGTaggedData> ConstraintInputs = InContext->InputData.GetInputsByPin(PCGConstrainGrammar::Constants::ConstraintsPinLabel);
+					for (auto ConstraintInput : ConstraintInputs)
+					{
+						const UPCGBasePointData* ConstraintPointData = Cast<const UPCGBasePointData>(ConstraintInput.Data);
+
+						for (int i = 0; i < SegmentData->GetNumPoints(); ++i)
+						{
+							auto Constraints = GetConstraintsOnSegment(SegmentData, i, ConstraintPointData);
+							auto ConstrainedSting = ConstrainGrammar(GrammarString, GetSegmentLength(SegmentData, i, Settings->SubdivisionAxis), ModulesInfo, Settings->Constraints);
+						}
+						//TODO add to output
+					}
+				}
+			}
 		}
 		else
 		{
@@ -93,10 +171,24 @@ bool FPCGConstrainGrammarElement::ExecuteInternal(FPCGContext* InContext) const
 	return false;
 }
 
-FString FPCGConstrainGrammarElement::ConstrainGrammar(const FString& GrammarString, float Length, const PCGSubdivisionBase::FModuleInfoMap& Modules, const TArray<FPCGGrammarConstraint> Constraints) const
+FString FPCGConstrainGrammarElement::ConstrainGrammar(const FString& GrammarString, float Length, const PCGSubdivisionBase::FModuleInfoMap& Modules,
+                                                      const TArray<FPCGGrammarConstraint> Constraints) const
 {
 	// TODO use implementation
 	return GrammarString;
+}
+
+float FPCGConstrainGrammarElement::GetSegmentLength(const UPCGBasePointData* SegmentData, int SegmentIndex, EPCGSplitAxis SubdivisionAxis) const
+{
+	auto Bounds = SegmentData->GetBoundsMax(SegmentIndex) - SegmentData->GetBoundsMin(SegmentIndex);
+
+	switch (SubdivisionAxis)
+	{
+	case EPCGSplitAxis::X: return Bounds.X;
+	case EPCGSplitAxis::Y: return Bounds.Y;
+	case EPCGSplitAxis::Z: return Bounds.Z;
+	default: return 0.0f;
+	}
 }
 
 FString FPCGConstrainGrammarElement::GetGrammarString(FPCGContext* InContext, const UPCGConstrainGrammarSettings* InSettings) const
@@ -106,16 +198,17 @@ FString FPCGConstrainGrammarElement::GetGrammarString(FPCGContext* InContext, co
 		return InSettings->GrammarSelection.GrammarString;
 	}
 
-	//TODO other stuff
+	//TODO get Grammar from attribute
+
 	return "";
 }
 
-TArray<FPCGGrammarConstraint> FPCGConstrainGrammarElement::GetConstraintsOnSpline(const UPCGConstrainGrammarSettings* InSettings) const
+TArray<FPCGGrammarConstraint> FPCGConstrainGrammarElement::GetConstraintsOnSpline(const UPCGPolyLineData* SplineData, const UPCGBasePointData* ConstraintPointData) const
 {
 	return {};
 }
 
-TArray<FPCGGrammarConstraint> FPCGConstrainGrammarElement::GetConstraintsOnSegment(const UPCGConstrainGrammarSettings* InSettings) const
+TArray<FPCGGrammarConstraint> FPCGConstrainGrammarElement::GetConstraintsOnSegment(const UPCGBasePointData* SegmentData, int SegmentIndex, const UPCGBasePointData* ConstraintPointData) const
 {
 	return {};
 }
@@ -153,7 +246,7 @@ float FPCGConstrainGrammarElement::GetShapeLength(const FPCGContext* InContext) 
 }*/
 
 PCGSubdivisionBase::FModuleInfoMap FPCGConstrainGrammarElement::GetModulesInfoMap(FPCGContext* InContext, const UPCGConstrainGrammarSettings* InSettings,
-                                                                               const UPCGParamData*& OutModuleInfoParamData) const
+                                                                                  const UPCGParamData*& OutModuleInfoParamData) const
 {
 	if (InSettings->bModuleInfoAsInput)
 	{
@@ -166,7 +259,7 @@ PCGSubdivisionBase::FModuleInfoMap FPCGConstrainGrammarElement::GetModulesInfoMa
 }
 
 PCGSubdivisionBase::FModuleInfoMap FPCGConstrainGrammarElement::GetModulesInfoMap(FPCGContext* InContext, const TArray<FPCGSubdivisionSubmodule>& SubmodulesInfo,
-	const UPCGParamData*& OutModuleInfoParamData) const
+                                                                                  const UPCGParamData*& OutModuleInfoParamData) const
 {
 	PCGSubdivisionBase::FModuleInfoMap ModulesInfo;
 	OutModuleInfoParamData = nullptr;
@@ -210,8 +303,12 @@ PCGSubdivisionBase::FModuleInfoMap FPCGConstrainGrammarElement::GetModulesInfoMa
 	TMap<FName, TTuple<FName, bool>> PropertyNameMapping;
 	PropertyNameMapping.Emplace(GET_MEMBER_NAME_CHECKED(FPCGSubdivisionSubmodule, Symbol), {InSubdivisionModuleAttributeNames.SymbolAttributeName, /*bCanBeDefaulted=*/false});
 	PropertyNameMapping.Emplace(GET_MEMBER_NAME_CHECKED(FPCGSubdivisionSubmodule, Size), {InSubdivisionModuleAttributeNames.SizeAttributeName, /*bCanBeDefaulted=*/false});
-	PropertyNameMapping.Emplace(GET_MEMBER_NAME_CHECKED(FPCGSubdivisionSubmodule, bScalable), {InSubdivisionModuleAttributeNames.ScalableAttributeName, /*bCanBeDefaulted=*/!InSubdivisionModuleAttributeNames.bProvideScalable});
-	PropertyNameMapping.Emplace(GET_MEMBER_NAME_CHECKED(FPCGSubdivisionSubmodule, DebugColor), {InSubdivisionModuleAttributeNames.DebugColorAttributeName, /*bCanBeDefaulted=*/!InSubdivisionModuleAttributeNames.bProvideDebugColor});
+	PropertyNameMapping.Emplace(GET_MEMBER_NAME_CHECKED(FPCGSubdivisionSubmodule, bScalable), {
+		                            InSubdivisionModuleAttributeNames.ScalableAttributeName, /*bCanBeDefaulted=*/!InSubdivisionModuleAttributeNames.bProvideScalable
+	                            });
+	PropertyNameMapping.Emplace(GET_MEMBER_NAME_CHECKED(FPCGSubdivisionSubmodule, DebugColor), {
+		                            InSubdivisionModuleAttributeNames.DebugColorAttributeName, /*bCanBeDefaulted=*/!InSubdivisionModuleAttributeNames.bProvideDebugColor
+	                            });
 
 	const TArray<FPCGSubdivisionSubmodule> AllModules = PCGPropertyHelpers::ExtractAttributeSetAsArrayOfStructs<FPCGSubdivisionSubmodule>(ParamData, &PropertyNameMapping, InContext);
 

@@ -9,6 +9,8 @@
 
 #include "PCGConstrainGrammar.generated.h"
 
+class UPCGPolyLineData;
+
 USTRUCT(BlueprintType)
 struct FPCGGrammarConstraint
 {
@@ -41,6 +43,8 @@ enum SubdivisionType
 namespace PCGConstrainGrammar::Constants
 {
 	const FName ConstraintsPinLabel = TEXT("Constraints");
+	const FName OutGrammarPinLabel = TEXT("OutGrammar");
+	
 	static const FText DuplicatedSymbolText = FText::FromString("Symbol {0} is duplicated, ignored.");
 }
 
@@ -66,7 +70,7 @@ protected:
 public:	
 	/** If true, takes in a shape input along which the grammar will be generated. */
 	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Settings|InputShape", meta = (PCG_Overridable))
-	bool bShapeAsInput = false;
+	bool bShapeAsInput = true;
 	
 	/** The type of subdivision node that will be used. */
 	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Settings|InputShape", meta = (EditCondition = "bShapeAsInput", EditConditionHides, PCG_Overridable))
@@ -103,6 +107,8 @@ public:
 	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Settings|Grammar", meta = (ShowOnlyInnerProperties, PCG_Overridable))
 	FPCGGrammarSelection GrammarSelection;
 	
+	// Grammar Output Attribute Name
+	
 };
 
 class FPCGConstrainGrammarElement : public IPCGElement
@@ -113,13 +119,14 @@ protected:
 	FString ConstrainGrammar(const FString& GrammarString, float Length, const PCGSubdivisionBase::FModuleInfoMap& Modules, const TArray<FPCGGrammarConstraint> Constraints) const;
 	
 	//float GetShapeLength(const FPCGContext* InContext) const;
+	float GetSegmentLength(const UPCGBasePointData* SegmentData, int SegmentIndex, EPCGSplitAxis SubdivisionAxis) const;
 	
 	// Access inputs
 	
 	FString GetGrammarString(FPCGContext* InContext, const UPCGConstrainGrammarSettings* InSettings) const;
 	
-	TArray<FPCGGrammarConstraint> GetConstraintsOnSpline(const UPCGConstrainGrammarSettings* InSettings) const;
-	TArray<FPCGGrammarConstraint> GetConstraintsOnSegment(const UPCGConstrainGrammarSettings* InSettings) const;
+	TArray<FPCGGrammarConstraint> GetConstraintsOnSpline(const UPCGPolyLineData* SplineData, const UPCGBasePointData* ConstraintPointData) const;
+	TArray<FPCGGrammarConstraint> GetConstraintsOnSegment(const UPCGBasePointData* SegmentData, int SegmentIndex, const UPCGBasePointData* ConstraintPointData) const;
 	
 	PCGSubdivisionBase::FModuleInfoMap GetModulesInfoMap(FPCGContext* InContext, const UPCGConstrainGrammarSettings* InSettings, const UPCGParamData*& OutModuleInfoParamData) const;
 	// Copied from PCGSubdivisionBase (can't inherit because functions are not exported)
