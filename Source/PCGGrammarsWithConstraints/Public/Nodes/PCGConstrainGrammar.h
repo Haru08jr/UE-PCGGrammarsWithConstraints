@@ -41,6 +41,7 @@ enum SubdivisionType
 namespace PCGConstrainGrammar::Constants
 {
 	const FName ConstraintsPinLabel = TEXT("Constraints");
+	static const FText DuplicatedSymbolText = FText::FromString("Symbol {0} is duplicated, ignored.");
 }
 
 UCLASS(BlueprintType, ClassGroup = (Procedural))
@@ -104,15 +105,26 @@ public:
 	
 };
 
-class FPCGConstrainGrammarElement : public FPCGSubdivisionBaseElement
+class FPCGConstrainGrammarElement : public IPCGElement
 {
 protected:
 	virtual bool ExecuteInternal(FPCGContext* InContext) const override;
 	
-	FString ConstrainGrammar(const FString& GrammarString, float Length, const FModuleInfoMap& Modules, const TArray<FPCGGrammarConstraint> Constraints) const;
+	FString ConstrainGrammar(const FString& GrammarString, float Length, const PCGSubdivisionBase::FModuleInfoMap& Modules, const TArray<FPCGGrammarConstraint> Constraints) const;
 	
-	float GetShapeLength(const FPCGContext* InContext) const;
+	//float GetShapeLength(const FPCGContext* InContext) const;
 	
-	PCGSubdivisionBase::FModuleInfoMap GetModulesInfo(FPCGContext* InContext, const UPCGConstrainGrammarSettings* InSettings, const UPCGParamData*& OutModuleInfoParamData) const;
+	// Access inputs
+	
 	FString GetGrammarString(FPCGContext* InContext, const UPCGConstrainGrammarSettings* InSettings) const;
+	
+	TArray<FPCGGrammarConstraint> GetConstraintsOnSpline(const UPCGConstrainGrammarSettings* InSettings) const;
+	TArray<FPCGGrammarConstraint> GetConstraintsOnSegment(const UPCGConstrainGrammarSettings* InSettings) const;
+	
+	PCGSubdivisionBase::FModuleInfoMap GetModulesInfoMap(FPCGContext* InContext, const UPCGConstrainGrammarSettings* InSettings, const UPCGParamData*& OutModuleInfoParamData) const;
+	// Copied from PCGSubdivisionBase (can't inherit because functions are not exported)
+	PCGSubdivisionBase::FModuleInfoMap GetModulesInfoMap(FPCGContext* InContext, const TArray<FPCGSubdivisionSubmodule>& SubmodulesInfo, const UPCGParamData*& OutModuleInfoParamData) const;
+	PCGSubdivisionBase::FModuleInfoMap GetModulesInfoMap(FPCGContext* InContext, const FPCGSubdivisionModuleAttributeNames& InSubdivisionModuleAttributeNames, const UPCGParamData*& OutModuleInfoParamData) const;
+	
+	
 };
