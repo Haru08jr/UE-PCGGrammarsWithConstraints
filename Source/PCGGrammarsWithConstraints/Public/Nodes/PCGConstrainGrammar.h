@@ -71,21 +71,14 @@ protected:
 	//~End UPCGSettings interface
 	
 public:	
-	/** If true, takes in a shape input along which the grammar will be generated. */
-	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Settings|InputShape", meta = (PCG_Overridable))
-	bool bShapeAsInput = true;
 	
 	/** The type of subdivision node that will be used. */
-	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Settings|InputShape", meta = (EditCondition = "bShapeAsInput", EditConditionHides, PCG_Overridable))
+	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Settings", meta = ( PCG_Overridable))
 	TEnumAsByte<SubdivisionType> SubdivisionType = Spline;
 	
 	/** Subdivision direction in point local space. */
-	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Settings|InputShape", meta = (EditCondition = "bShapeAsInput && (SubdivisionType == SubdivisionType::Segment)", EditConditionHides, PCG_Overridable))
+	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Settings", meta = (EditCondition = "SubdivisionType == SubdivisionType::Segment", EditConditionHides, PCG_Overridable))
 	EPCGSplitAxis SubdivisionAxis = EPCGSplitAxis::X;
-	
-	/** The length of the shape along which the grammar will be generated. */
-	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Settings|InputShape", meta = (EditCondition = "!bShapeAsInput", EditConditionHides, PCG_Overridable))
-	float Length = 0.0;
 	
 	/** Set it to true to pass the info as attribute set. */
 	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Settings|Modules")
@@ -100,14 +93,14 @@ public:
 	FPCGSubdivisionModuleAttributeNames ModulesInfoAttributeNames;
 	
 	/** If true, takes in the constraint positions as points. */
-	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Settings|Constraints", meta = (EditCondition = "bShapeAsInput", EditConditionHides, PCG_Overridable))
+	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Settings|Constraints", meta = (PCG_Overridable))
 	bool bConstraintsAsInput = false;
 	
-	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Settings|Constraints", meta = (EditCondition = "!bShapeAsInput || !bConstraintsAsInput", EditConditionHides, PCG_Overridable))
+	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Settings|Constraints", meta = (EditCondition = " !bConstraintsAsInput", EditConditionHides, PCG_Overridable))
 	TArray<FPCGGrammarConstraint> Constraints;
 	
 	/** An encoded string that represents how to apply a set of rules to a series of defined modules. */
-	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Settings|Grammar", meta = (ShowOnlyInnerProperties, PCG_Overridable))
+	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Settings", meta = (ShowOnlyInnerProperties, PCG_Overridable))
 	FPCGGrammarSelection GrammarSelection;
 	
 	/** Name of the grammar output attribute. */
@@ -145,11 +138,13 @@ private:
 	
 	template<typename T>
 	FPCGMetadataAttribute<T>* CreateAndValidateAttribute(FPCGContext* InContext, TObjectPtr<UPCGMetadata>& Metadata, const FName AttributeName, const T DefaultValue) const;
+	
+	
 };
 
 template <typename T>
 FPCGMetadataAttribute<T>* FPCGConstrainGrammarElement::CreateAndValidateAttribute(FPCGContext* InContext, TObjectPtr<UPCGMetadata>& Metadata, const FName AttributeName, const T DefaultValue) const
-{
+{	
 	auto OutAttribute = Metadata->FindOrCreateAttribute<T>(AttributeName, DefaultValue, false, true);
 	if (!OutAttribute)
 	{

@@ -12,20 +12,18 @@ TArray<FPCGPinProperties> UPCGConstrainGrammarSettings::InputPinProperties() con
 {
 	TArray<FPCGPinProperties> PinProperties;
 
-	if (bShapeAsInput)
+
+	if (SubdivisionType == Spline)
 	{
-		if (SubdivisionType == Spline)
-		{
-			FPCGPinProperties& InShapePin = PinProperties.Emplace_GetRef(PCGPinConstants::DefaultInputLabel, EPCGDataType::PolyLine, false, true,
-			                                                             FText::FromString("The Spline on which the Grammar will be generated. Should match the In pin of Subdivide Spline."));
-			InShapePin.SetRequiredPin();
-		}
-		else
-		{
-			FPCGPinProperties& InShapePin = PinProperties.Emplace_GetRef(PCGPinConstants::DefaultInputLabel, EPCGDataType::Point, false, true,
-			                                                             FText::FromString("The Segments on which the Grammar will be generated. Should match the In pin of Subdivide Segment."));
-			InShapePin.SetRequiredPin();
-		}
+		FPCGPinProperties& InShapePin = PinProperties.Emplace_GetRef(PCGPinConstants::DefaultInputLabel, EPCGDataType::PolyLine, false, true,
+		                                                             FText::FromString("The Spline on which the Grammar will be generated. Should match the In pin of Subdivide Spline."));
+		InShapePin.SetRequiredPin();
+	}
+	else
+	{
+		FPCGPinProperties& InShapePin = PinProperties.Emplace_GetRef(PCGPinConstants::DefaultInputLabel, EPCGDataType::Point, false, true,
+		                                                             FText::FromString("The Segments on which the Grammar will be generated. Should match the In pin of Subdivide Segment."));
+		InShapePin.SetRequiredPin();
 	}
 
 	if (bConstraintsAsInput)
@@ -49,20 +47,13 @@ TArray<FPCGPinProperties> UPCGConstrainGrammarSettings::OutputPinProperties() co
 {
 	TArray<FPCGPinProperties> PinProperties;
 
-	if (!bShapeAsInput)
+	if (SubdivisionType == Spline)
 	{
-		PinProperties.Emplace(PCGConstrainGrammar::Constants::OutGrammarPinLabel, EPCGDataType::Param, false, false);
+		PinProperties.Emplace(PCGPinConstants::DefaultOutputLabel, EPCGDataType::Spline, false, true);
 	}
 	else
 	{
-		if (SubdivisionType == Spline)
-		{
-			PinProperties.Emplace(PCGPinConstants::DefaultOutputLabel, EPCGDataType::Spline, false, true);
-		}
-		else
-		{
-			PinProperties.Emplace(PCGPinConstants::DefaultOutputLabel, EPCGDataType::Point, false, true);
-		}
+		PinProperties.Emplace(PCGPinConstants::DefaultOutputLabel, EPCGDataType::Point, false, true);
 	}
 
 	return PinProperties;
@@ -85,97 +76,87 @@ bool FPCGConstrainGrammarElement::ExecuteInternal(FPCGContext* InContext) const
 	const UPCGParamData* ModuleInfoParamData = nullptr;
 	const PCGSubdivisionBase::FModuleInfoMap ModulesInfo = GetModulesInfoMap(InContext, Settings, ModuleInfoParamData);
 
-	FString GrammarString = GetGrammarString(InContext, Settings);
+	FString GrammarString = GetGrammarString(InContext, Settings); //TODO change this
 
-	if (!Settings->bShapeAsInput)
+	if (Settings->SubdivisionType == Spline)
 	{
-		auto ConstrainedSting = ConstrainGrammar(GrammarString, Settings->Length, ModulesInfo, Settings->Constraints);
+		const TArray<FPCGTaggedData> SplineInputs = InContext->InputData.GetInputsByPin(PCGPinConstants::DefaultInputLabel);
 
-		// Construct output
-		UPCGParamData* OutputData = FPCGContext::NewObject_AnyThread<UPCGParamData>(InContext);
-		check(OutputData);
+		for (const auto& SplineInput : SplineInputs)
+		{
+			const UPCGSplineData* SplineData = Cast<const UPCGSplineData>(SplineInput.Data);
 
-		// TODO create attribute & add value
+			if (!Settings->bConstraintsAsInput)
+			{
+				auto ConstrainedString = ConstrainGrammar(GrammarString, SplineData->GetLength(), ModulesInfo, Settings->Constraints);
 
-		FPCGTaggedData& NewData = Outputs.Emplace_GetRef();
-		NewData.Data = OutputData;
+				auto OutSplineData = SplineData->DuplicateData(InContext);
+				Outputs.Emplace_GetRef().Data = OutSplineData;
+				CreateAndValidateAttribute(InContext, OutSplineData->Metadata, Settings->GrammarAttributeName, ConstrainedString);
+			}
+			else
+			{
+				TArray<FPCGTaggedData> ConstraintInputs = InContext->InputData.GetInputsByPin(PCGConstrainGrammar::Constants::ConstraintsPinLabel);
+				for (const auto& ConstraintInput : ConstraintInputs)
+				{
+					const UPCGBasePointData* ConstraintPointData = Cast<const UPCGBasePointData>(ConstraintInput.Data);
+					auto Constraints = GetConstraintsOnSpline(SplineData, ConstraintPointData);
+
+					auto ConstrainedString = ConstrainGrammar(GrammarString, SplineData->GetLength(), ModulesInfo, Constraints);
+
+					auto OutSplineData = SplineData->DuplicateData(InContext);
+					Outputs.Emplace_GetRef().Data = OutSplineData;
+					CreateAndValidateAttribute(InContext, OutSplineData->Metadata, Settings->GrammarAttributeName, ConstrainedString);
+				}
+			}
+		}
+	}
+	else if (Settings->SubdivisionType == Segment)
+	{
+		const TArray<FPCGTaggedData> SegmentInputs = InContext->InputData.GetInputsByPin(PCGPinConstants::DefaultInputLabel);
+
+		for (auto SegmentInput : SegmentInputs)
+		{
+			const UPCGBasePointData* SegmentData = Cast<const UPCGBasePointData>(SegmentInput.Data);
+
+			if (!Settings->bConstraintsAsInput)
+			{
+				//auto OutSegmentData = CopyPointDataToOutput(InContext, Outputs.Emplace_GetRef(), SegmentData);
+				auto OutSegmentData = Cast<UPCGBasePointData>(SegmentData->DuplicateData(InContext));
+				Outputs.Emplace_GetRef().Data = OutSegmentData;
+				FPCGMetadataAttribute<FString>* GrammarAttribute = CreateAndValidateAttribute<FString>(InContext, OutSegmentData->Metadata, Settings->GrammarAttributeName, "");
+
+				for (int i = 0; i < OutSegmentData->GetNumPoints(); ++i)
+				{
+					auto ConstrainedString = ConstrainGrammar(GrammarString, GetSegmentLength(SegmentData, i, Settings->SubdivisionAxis), ModulesInfo, Settings->Constraints);
+					GrammarAttribute->SetValue<FString>(OutSegmentData->GetMetadataEntry(i), ConstrainedString);
+				}
+			}
+			else
+			{
+				TArray<FPCGTaggedData> ConstraintInputs = InContext->InputData.GetInputsByPin(PCGConstrainGrammar::Constants::ConstraintsPinLabel);
+				for (auto ConstraintInput : ConstraintInputs)
+				{
+					const UPCGBasePointData* ConstraintPointData = Cast<const UPCGBasePointData>(ConstraintInput.Data);
+
+					//auto OutSegmentData = CopyPointDataToOutput(InContext, Outputs.Emplace_GetRef(), SegmentData);
+					auto OutSegmentData = Cast<UPCGBasePointData>(SegmentData->DuplicateData(InContext));
+					Outputs.Emplace_GetRef().Data = OutSegmentData;
+					FPCGMetadataAttribute<FString>* GrammarAttribute = CreateAndValidateAttribute<FString>(InContext, OutSegmentData->Metadata, Settings->GrammarAttributeName, "");
+
+					for (int i = 0; i < OutSegmentData->GetNumPoints(); ++i)
+					{
+						auto Constraints = GetConstraintsOnSegment(SegmentData, i, ConstraintPointData);
+						auto ConstrainedString = ConstrainGrammar(GrammarString, GetSegmentLength(SegmentData, i, Settings->SubdivisionAxis), ModulesInfo, Settings->Constraints);
+						GrammarAttribute->SetValue<FString>(OutSegmentData->GetMetadataEntry(i), ConstrainedString);
+					}
+				}
+			}
+		}
 	}
 	else
 	{
-		if (Settings->SubdivisionType == Spline)
-		{
-			const TArray<FPCGTaggedData> SplineInputs = InContext->InputData.GetInputsByPin(PCGPinConstants::DefaultInputLabel);
-
-			for (const auto& SplineInput : SplineInputs)
-			{
-				const UPCGSplineData* SplineData = Cast<const UPCGSplineData>(SplineInput.Data);
-				
-				if (!Settings->bConstraintsAsInput)
-				{
-					auto ConstrainedString = ConstrainGrammar(GrammarString, SplineData->GetLength(), ModulesInfo, Settings->Constraints);
-					
-					auto OutSplineData = CopySplineDataToOutput(InContext, Outputs.Emplace_GetRef(), SplineData);
-					CreateAndValidateAttribute(InContext, OutSplineData->Metadata, Settings->GrammarAttributeName, ConstrainedString);
-				}
-				else
-				{
-					TArray<FPCGTaggedData> ConstraintInputs = InContext->InputData.GetInputsByPin(PCGConstrainGrammar::Constants::ConstraintsPinLabel);
-					for (const auto& ConstraintInput : ConstraintInputs)
-					{
-						const UPCGBasePointData* ConstraintPointData = Cast<const UPCGBasePointData>(ConstraintInput.Data);
-						auto Constraints = GetConstraintsOnSpline(SplineData, ConstraintPointData);
-
-						auto ConstrainedString = ConstrainGrammar(GrammarString, SplineData->GetLength(), ModulesInfo, Constraints);
-						
-						auto OutSplineData = CopySplineDataToOutput(InContext, Outputs.Emplace_GetRef(), SplineData);
-						CreateAndValidateAttribute(InContext, OutSplineData->Metadata, Settings->GrammarAttributeName, ConstrainedString);
-					}
-				}
-			}
-		}
-		else if (Settings->SubdivisionType == Segment)
-		{
-			const TArray<FPCGTaggedData> SegmentInputs = InContext->InputData.GetInputsByPin(PCGPinConstants::DefaultInputLabel);
-
-			for (auto SegmentInput : SegmentInputs)
-			{
-				const UPCGBasePointData* SegmentData = Cast<const UPCGBasePointData>(SegmentInput.Data);
-
-				if (!Settings->bConstraintsAsInput)
-				{
-					auto OutSegmentData = CopyPointDataToOutput(InContext, Outputs.Emplace_GetRef(), SegmentData);
-					auto GrammarAttribute = CreateAndValidateAttribute(InContext, OutSegmentData->Metadata, Settings->GrammarAttributeName, "");
-					
-					for (int i = 0; i < OutSegmentData->GetNumPoints(); ++i)
-					{
-						auto ConstrainedString = ConstrainGrammar(GrammarString, GetSegmentLength(SegmentData, i, Settings->SubdivisionAxis), ModulesInfo, Settings->Constraints);
-						//GrammarAttribute->SetValue<FString>(OutSegmentData->GetMetadataEntry(i), ConstrainedString);
-					}
-				}
-				else
-				{
-					TArray<FPCGTaggedData> ConstraintInputs = InContext->InputData.GetInputsByPin(PCGConstrainGrammar::Constants::ConstraintsPinLabel);
-					for (auto ConstraintInput : ConstraintInputs)
-					{
-						const UPCGBasePointData* ConstraintPointData = Cast<const UPCGBasePointData>(ConstraintInput.Data);
-						
-						auto OutSegmentData = CopyPointDataToOutput(InContext, Outputs.Emplace_GetRef(), SegmentData);
-						auto GrammarAttribute = CreateAndValidateAttribute(InContext, OutSegmentData->Metadata, Settings->GrammarAttributeName, "");
-						
-						for (int i = 0; i < OutSegmentData->GetNumPoints(); ++i)
-						{
-							auto Constraints = GetConstraintsOnSegment(SegmentData, i, ConstraintPointData);
-							auto ConstrainedString = ConstrainGrammar(GrammarString, GetSegmentLength(SegmentData, i, Settings->SubdivisionAxis), ModulesInfo, Settings->Constraints);
-							//GrammarAttribute->SetValue<FString>(OutSegmentData->GetMetadataEntry(i), ConstrainedString);
-						}
-					}
-				}
-			}
-		}
-		else
-		{
-			// TODO error
-		}
+		// TODO error message
 	}
 
 	return true;
@@ -309,21 +290,27 @@ PCGSubdivisionBase::FModuleInfoMap FPCGConstrainGrammarElement::GetModulesInfoMa
 }
 
 UPCGSplineData* FPCGConstrainGrammarElement::CopySplineDataToOutput(FPCGContext* InContext, FPCGTaggedData& OutputData, const UPCGSplineData* InSplineData)
-{
+{	
 	UPCGSplineData* CopiedSplineData = FPCGContext::NewObject_AnyThread<UPCGSplineData>(InContext);
 	CopiedSplineData->Initialize(InSplineData->SplineStruct);
 	CopiedSplineData->InitializeFromData(InSplineData);
 	OutputData.Data = CopiedSplineData;
-	
+
 	return CopiedSplineData;
 }
 
 UPCGBasePointData* FPCGConstrainGrammarElement::CopyPointDataToOutput(FPCGContext* InContext, FPCGTaggedData& OutputData, const UPCGBasePointData* InPointData)
 {
+	auto CopiedPointData = InPointData->DuplicateData(InContext);
+	/*
 	UPCGBasePointData* CopiedPointData = FPCGContext::NewObject_AnyThread<UPCGBasePointData>(InContext);
-	CopiedPointData->InitializeFromData(InPointData);
-	InPointData->CopyPointsTo(CopiedPointData, 0, 0, InPointData->GetNumPoints());
-	OutputData.Data = CopiedPointData;
+	// TODO constructing objects crashes here
+	FPCGInitializeFromDataParams Params(InPointData);
+	Params.bIsDuplicatingData = true;
+	CopiedPointData->InitializeFromDataWithParams(Params);
 	
-	return CopiedPointData;
+	//InPointData->CopyPointsTo(CopiedPointData, 0, 0, InPointData->GetNumPoints());*/
+	OutputData.Data = CopiedPointData;
+
+	return Cast<UPCGBasePointData>(CopiedPointData);
 }
