@@ -8,6 +8,7 @@
 #include "Elements/Grammar/PCGSubdivisionBase.h"
 #include "Metadata/PCGMetadata.h"
 #include "Metadata/PCGMetadataAttributeTpl.h"
+#include "Metadata/Accessors/PCGAttributeAccessorHelpers.h"
 
 #include "PCGConstrainGrammar.generated.h"
 
@@ -115,31 +116,26 @@ protected:
 	virtual bool ExecuteInternal(FPCGContext* InContext) const override;
 	
 	FString ConstrainGrammar(const FString& GrammarString, float Length, const PCGSubdivisionBase::FModuleInfoMap& Modules, const TArray<FPCGGrammarConstraint> Constraints) const;
+
+	static float GetSegmentLength(const UPCGBasePointData* SegmentData, int SegmentIndex, EPCGSplitAxis SubdivisionAxis);
+
+	static TArray<FPCGGrammarConstraint> GetConstraintsOnSpline(const UPCGPolyLineData* SplineData, const UPCGBasePointData* ConstraintPointData);
+	static TArray<FPCGGrammarConstraint> GetConstraintsOnSegment(const UPCGBasePointData* SegmentData, int SegmentIndex, const UPCGBasePointData* ConstraintPointData);
 	
-	float GetSegmentLength(const UPCGBasePointData* SegmentData, int SegmentIndex, EPCGSplitAxis SubdivisionAxis) const;
-	
-	// Accessing inputs
-	
-	FString GetGrammarString(FPCGContext* InContext, const UPCGConstrainGrammarSettings* InSettings) const;
-	
-	TArray<FPCGGrammarConstraint> GetConstraintsOnSpline(const UPCGPolyLineData* SplineData, const UPCGBasePointData* ConstraintPointData) const;
-	TArray<FPCGGrammarConstraint> GetConstraintsOnSegment(const UPCGBasePointData* SegmentData, int SegmentIndex, const UPCGBasePointData* ConstraintPointData) const;
-	
+private:
+	/** Read Module infos if necessary and put them into a map */
 	PCGSubdivisionBase::FModuleInfoMap GetModulesInfoMap(FPCGContext* InContext, const UPCGConstrainGrammarSettings* InSettings, const UPCGParamData*& OutModuleInfoParamData) const;
 	// Copied from PCGSubdivisionBase (can't inherit because functions are not exported)
 	PCGSubdivisionBase::FModuleInfoMap GetModulesInfoMap(FPCGContext* InContext, const TArray<FPCGSubdivisionSubmodule>& SubmodulesInfo, const UPCGParamData*& OutModuleInfoParamData) const;
 	PCGSubdivisionBase::FModuleInfoMap GetModulesInfoMap(FPCGContext* InContext, const FPCGSubdivisionModuleAttributeNames& InSubdivisionModuleAttributeNames, const UPCGParamData*& OutModuleInfoParamData) const;
 	
-private:
-	static UPCGSplineData* CopySplineDataToOutput(FPCGContext* InContext, FPCGTaggedData& OutputData, const UPCGSplineData* InSplineData);
-	static UPCGBasePointData* CopyPointDataToOutput(FPCGContext* InContext, FPCGTaggedData& OutputData, const UPCGBasePointData* InPointData);
-	
-	// Accessing & adding attributes
-	
+	/** Create a new attribute in Metadata and fill all entries with DefaultValue. */
 	template<typename T>
 	FPCGMetadataAttribute<T>* CreateAndValidateAttribute(FPCGContext* InContext, TObjectPtr<UPCGMetadata>& Metadata, const FName AttributeName, const T DefaultValue) const;
 	
-	
+	/** Read the values of Attribute in InData for NumValues entries. */
+	template<typename T>
+	static void FPCGConstrainGrammarElement::ReadAttributeValues(FPCGContext* InContext, const UPCGData* InData, const FPCGAttributePropertyInputSelector& Attribute, int NumValues, TArray<T>& OutValues);
 };
 
 template <typename T>
@@ -151,4 +147,25 @@ FPCGMetadataAttribute<T>* FPCGConstrainGrammarElement::CreateAndValidateAttribut
 		PCGLog::Metadata::LogFailToCreateAttributeError<T>(AttributeName, InContext);
 	}
 	return OutAttribute;
+}
+
+template <typename T>
+void FPCGConstrainGrammarElement::ReadAttributeValues(FPCGContext* InContext, const UPCGData* InData, const FPCGAttributePropertyInputSelector& Attribute, int NumValues, TArray<T>& OutValues)
+{
+	const FPCGAttributePropertyInputSelector Selector = Attribute.CopyAndFixLast(InData);
+	const TUniquePtr<const IPCGAttributeAccessor> Accessor = PCGAttributeAccessorHelpers::CreateConstAccessor(InData, Selector);
+	const TUniquePtr<const IPCGAttributeAccessorKeys> AccessorKeys = PCGAttributeAccessorHelpers::CreateConstKeys(InData, Selector);
+	if (!Accessor || !AccessorKeys)
+	{
+		PCGLog::Metadata::LogFailToCreateAccessorError(Selector, InContext);
+	}
+	
+	OutValues.Empty();
+	OutValues.AddDefaulted(NumValues);
+	TArrayView<FString> Values(OutValues);
+	
+	if (!Accessor->GetRange(Values, 0, *AccessorKeys, EPCGAttributeAccessorFlags::AllowBroadcastAndConstructible))
+	{
+		PCGLog::Metadata::LogFailToGetAttributeError<int32>(Selector, Accessor.Get(), InContext);
+	}
 }
