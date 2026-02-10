@@ -98,7 +98,7 @@ bool FPCGConstrainGrammarElement::ExecuteInternal(FPCGContext* InContext) const
 
 				auto OutSplineData = SplineData->DuplicateData(InContext);
 				Outputs.Emplace_GetRef().Data = OutSplineData;
-				CreateAndValidateAttribute(InContext, OutSplineData->Metadata, Settings->GrammarAttributeName, ConstrainedString);
+				CreateAndValidateAttribute(InContext, OutSplineData->Metadata, Settings->OutGrammarAttribute, ConstrainedString);
 			}
 			else
 			{
@@ -106,13 +106,13 @@ bool FPCGConstrainGrammarElement::ExecuteInternal(FPCGContext* InContext) const
 				for (const auto& ConstraintInput : ConstraintInputs)
 				{
 					const UPCGBasePointData* ConstraintPointData = Cast<const UPCGBasePointData>(ConstraintInput.Data);
-					auto Constraints = GetConstraintsOnSpline(SplineData, ConstraintPointData);
+					auto Constraints = GetConstraintsOnSpline(InContext, Settings, SplineData, ConstraintPointData);
 
 					auto ConstrainedString = ConstrainGrammar(Grammar, SplineData->GetLength(), ModulesInfo, Constraints);
 
 					auto OutSplineData = SplineData->DuplicateData(InContext);
 					Outputs.Emplace_GetRef().Data = OutSplineData;
-					CreateAndValidateAttribute(InContext, OutSplineData->Metadata, Settings->GrammarAttributeName, ConstrainedString);
+					CreateAndValidateAttribute(InContext, OutSplineData->Metadata, Settings->OutGrammarAttribute, ConstrainedString);
 				}
 			}
 		}
@@ -133,7 +133,7 @@ bool FPCGConstrainGrammarElement::ExecuteInternal(FPCGContext* InContext) const
 				//auto OutSegmentData = CopyPointDataToOutput(InContext, Outputs.Emplace_GetRef(), SegmentData);
 				auto OutSegmentData = Cast<UPCGBasePointData>(SegmentData->DuplicateData(InContext));
 				Outputs.Emplace_GetRef().Data = OutSegmentData;
-				FPCGMetadataAttribute<FString>* GrammarAttribute = CreateAndValidateAttribute<FString>(InContext, OutSegmentData->Metadata, Settings->GrammarAttributeName, "");
+				FPCGMetadataAttribute<FString>* GrammarAttribute = CreateAndValidateAttribute<FString>(InContext, OutSegmentData->Metadata, Settings->OutGrammarAttribute, "");
 
 				for (int i = 0; i < OutSegmentData->GetNumPoints(); ++i)
 				{
@@ -153,11 +153,11 @@ bool FPCGConstrainGrammarElement::ExecuteInternal(FPCGContext* InContext) const
 					//auto OutSegmentData = CopyPointDataToOutput(InContext, Outputs.Emplace_GetRef(), SegmentData);
 					auto OutSegmentData = Cast<UPCGBasePointData>(SegmentData->DuplicateData(InContext));
 					Outputs.Emplace_GetRef().Data = OutSegmentData;
-					FPCGMetadataAttribute<FString>* GrammarAttribute = CreateAndValidateAttribute<FString>(InContext, OutSegmentData->Metadata, Settings->GrammarAttributeName, "");
+					FPCGMetadataAttribute<FString>* GrammarAttribute = CreateAndValidateAttribute<FString>(InContext, OutSegmentData->Metadata, Settings->OutGrammarAttribute, "");
 
 					for (int i = 0; i < OutSegmentData->GetNumPoints(); ++i)
 					{
-						auto Constraints = GetConstraintsOnSegment(SegmentData, i, ConstraintPointData);
+						auto Constraints = GetConstraintsOnSegment(InContext, Settings, SegmentData, i, ConstraintPointData);
 
 						auto Grammar = Settings->GrammarSelection.bGrammarAsAttribute ? GrammarStrings[i] : Settings->GrammarSelection.GrammarString;
 						auto ConstrainedString = ConstrainGrammar(Grammar, GetSegmentLength(SegmentData, i, Settings->SubdivisionAxis), ModulesInfo, Constraints);
@@ -179,34 +179,29 @@ FString FPCGConstrainGrammarElement::ConstrainGrammar(const FString& GrammarStri
 
 float FPCGConstrainGrammarElement::GetSegmentLength(const UPCGBasePointData* SegmentData, int SegmentIndex, EPCGSplitAxis SubdivisionAxis)
 {
-	auto Bounds = SegmentData->GetBoundsMax(SegmentIndex) - SegmentData->GetBoundsMin(SegmentIndex);
-
-	switch (SubdivisionAxis)
-	{
-	case EPCGSplitAxis::X: return Bounds.X;
-	case EPCGSplitAxis::Y: return Bounds.Y;
-	case EPCGSplitAxis::Z: return Bounds.Z;
-	default: return 0.0f;
-	}
+	auto Bounds = SegmentData->GetLocalBounds(SegmentIndex);
+	return GetVectorComponent(Bounds.GetSize(), SubdivisionAxis);
 }
 
-TArray<FPCGGrammarConstraint> FPCGConstrainGrammarElement::GetConstraintsOnSpline(const UPCGSplineData* SplineData, const UPCGBasePointData* ConstraintPointData)
+TArray<FPCGGrammarConstraint> FPCGConstrainGrammarElement::GetConstraintsOnSpline(FPCGContext* InContext, const UPCGConstrainGrammarSettings* InSettings, const UPCGSplineData* SplineData,
+                                                                                  const UPCGBasePointData* ConstraintPointData)
 {
 	TArray<FPCGGrammarConstraint> Constraints;
+
+	TArray<FString> Symbols;
+	ReadAttributeValues(InContext, ConstraintPointData, InSettings->ConstraintAttributeNames.SymbolAttributeName, ConstraintPointData->GetNumPoints(), Symbols);
 
 	for (int i = 0; i < ConstraintPointData->GetNumPoints(); i++)
 	{
 		FVector PositionOnSpline;
 		if (!SamplePointOnSpline(SplineData->SplineStruct, ConstraintPointData->GetTransform(i), FBox(ConstraintPointData->GetBoundsMin(i), ConstraintPointData->GetBoundsMax(i)), PositionOnSpline))
 			continue;
-		
+
 		auto Distance = GetDistanceAlongSpline(SplineData->SplineStruct, PositionOnSpline);
 		if (Distance < 0.0f || Distance > SplineData->GetLength())
 			continue;
-		
-		// TODO read attributes & stuff
-		
-		Constraints.Emplace("a", Distance, false, 0.0);
+
+		Constraints.Emplace(FText::FromString(Symbols[i]), Distance, false, 0.0);
 	}
 
 	return Constraints;
@@ -218,7 +213,7 @@ float FPCGConstrainGrammarElement::GetDistanceAlongSpline(const FPCGSplineStruct
 
 	auto LowerBound = Spline.GetDistanceAlongSplineAtSplinePoint(ClosestSplinePointKey);
 	auto HigherBound = Spline.GetDistanceAlongSplineAtSplinePoint(ClosestSplinePointKey + 1);
-	
+
 	auto DistanceEstimate = (LowerBound + HigherBound) * 0.5f;
 
 	// TODO check if this actually works
@@ -227,13 +222,9 @@ float FPCGConstrainGrammarElement::GetDistanceAlongSpline(const FPCGSplineStruct
 		auto MiddleInputKey = Spline.GetInputKeyAtDistanceAlongSpline(DistanceEstimate);
 
 		if (ClosestSplinePointKey < MiddleInputKey)
-		{
 			HigherBound = DistanceEstimate;
-		}
 		else
-		{
 			LowerBound = DistanceEstimate;
-		}
 
 		DistanceEstimate = (LowerBound + HigherBound) * 0.5f;
 	}
@@ -246,19 +237,41 @@ bool FPCGConstrainGrammarElement::SamplePointOnSpline(const FPCGSplineStruct& Sp
 	const FVector InPosition = Transform.GetLocation();
 	float NearestPointKey = Spline.FindInputKeyClosestToWorldLocation(InPosition);
 	FTransform NearestTransform = Spline.GetTransformAtSplineInputKey(NearestPointKey, ESplineCoordinateSpace::World, true);
-	
+
 	OutPosition = NearestTransform.GetLocation();
-	
+
 	FVector LocalPoint = NearestTransform.InverseTransformPosition(InPosition);
 	if (Bounds.IsInside(LocalPoint))
 		return true;
 	return false;
 }
 
-TArray<FPCGGrammarConstraint> FPCGConstrainGrammarElement::GetConstraintsOnSegment(const UPCGBasePointData* SegmentData, int SegmentIndex, const UPCGBasePointData* ConstraintPointData)
+TArray<FPCGGrammarConstraint> FPCGConstrainGrammarElement::GetConstraintsOnSegment(FPCGContext* InContext, const UPCGConstrainGrammarSettings* InSettings, const UPCGBasePointData* SegmentData,
+                                                                                   int SegmentIndex, const UPCGBasePointData* ConstraintPointData)
 {
-	//TODO
-	return {};
+	TArray<FPCGGrammarConstraint> Constraints;
+
+	TArray<FString> Symbols;
+	ReadAttributeValues(InContext, ConstraintPointData, InSettings->ConstraintAttributeNames.SymbolAttributeName, ConstraintPointData->GetNumPoints(), Symbols);
+
+	const auto SegmentTransform = SegmentData->GetTransform(SegmentIndex);
+	const auto SegmentBounds = SegmentData->GetLocalBounds(SegmentIndex).TransformBy(SegmentTransform);
+
+	for (int i = 0; i < ConstraintPointData->GetNumPoints(); i++)
+	{
+		const auto ConstraintTransform = ConstraintPointData->GetTransform(i);
+		const auto ConstraintBounds = ConstraintPointData->GetLocalBounds(i).TransformBy(ConstraintTransform);
+
+		if (!SegmentBounds.Intersect(ConstraintBounds))
+			continue;
+
+		auto Distances = SegmentBounds.GetClosestPointTo(ConstraintTransform.GetLocation()) - SegmentBounds.Min;
+		float Distance = GetVectorComponent(Distances, InSettings->SubdivisionAxis);
+
+		Constraints.Emplace(FText::FromString(Symbols[i]), Distance, false, 0.0);
+	}
+
+	return Constraints;
 }
 
 PCGSubdivisionBase::FModuleInfoMap FPCGConstrainGrammarElement::GetModulesInfoMap(FPCGContext* InContext, const UPCGConstrainGrammarSettings* InSettings,

@@ -22,7 +22,7 @@ struct FPCGGrammarConstraint
 	GENERATED_BODY()
 	/** Symbol in the grammar. */
 	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "")
-	FName Symbol = NAME_None;
+	FText Symbol;
 	
 	/** Position along the generation shape. */
 	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "")
@@ -35,7 +35,16 @@ struct FPCGGrammarConstraint
 	/** Position along the generation shape. */
 	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "", meta=(EditCondition = "bHasWidth"))
 	double Width = 100.0;
+};
+
+USTRUCT(BlueprintType)
+struct FPCGGrammarConstraintAttributeNames
+{
+	GENERATED_BODY()
 	
+	/** Mandatory. Expected type: FName. */
+	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "")
+	FName SymbolAttributeName = PCGSubdivisionBase::Constants::SymbolAttributeName;
 };
 
 UENUM()
@@ -83,22 +92,25 @@ public:
 	EPCGSplitAxis SubdivisionAxis = EPCGSplitAxis::X;
 	
 	/** Set to true to pass the info as attribute set. */
-	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Settings|Modules")
+	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Settings")
 	bool bModuleInfoAsInput = false;
 
 	/** Fixed array of modules used for the subdivision. */
-	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Settings|Modules", meta = (EditCondition = "!bModuleInfoAsInput", EditConditionHides, DisplayAfter = bModuleInfoAsInput))
+	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Settings", meta = (EditCondition = "!bModuleInfoAsInput", EditConditionHides, DisplayAfter = bModuleInfoAsInput))
 	TArray<FPCGSubdivisionSubmodule> ModulesInfo;
 
 	/** Fixed array of modules used for the subdivision. */
-	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Settings|Modules", meta = (EditCondition = "bModuleInfoAsInput", EditConditionHides, DisplayAfter = bModuleInfoAsInput, DisplayName = "Attribute Names for Module Info"))
+	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Settings", meta = (EditCondition = "bModuleInfoAsInput", EditConditionHides, DisplayAfter = bModuleInfoAsInput, DisplayName = "Attribute Names for Module Info"))
 	FPCGSubdivisionModuleAttributeNames ModulesInfoAttributeNames;
 	
 	/** If true, takes in the constraint positions as points. */
-	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Settings|Constraints", meta = (PCG_Overridable))
+	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Settings", meta = (PCG_Overridable))
 	bool bConstraintsAsInput = false;
 	
-	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Settings|Constraints", meta = (EditCondition = " !bConstraintsAsInput", EditConditionHides, PCG_Overridable))
+	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Settings", meta = (EditCondition = "bConstraintsAsInput", EditConditionHides, PCG_Overridable))
+	FPCGGrammarConstraintAttributeNames ConstraintAttributeNames;
+	
+	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Settings", meta = (EditCondition = "!bConstraintsAsInput", EditConditionHides, PCG_Overridable))
 	TArray<FPCGGrammarConstraint> Constraints;
 	
 	/** An encoded string that represents how to apply a set of rules to a series of defined modules. */
@@ -106,8 +118,8 @@ public:
 	FPCGGrammarSelection GrammarSelection;
 	
 	/** Name of the grammar output attribute. */
-	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Settings|Output", meta = (PCG_Overridable))
-	FName GrammarAttributeName = TEXT("Grammar");
+	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Settings", meta = (PCG_Overridable))
+	FName OutGrammarAttribute = TEXT("Grammar");
 	
 };
 
@@ -120,8 +132,8 @@ protected:
 
 	static float GetSegmentLength(const UPCGBasePointData* SegmentData, int SegmentIndex, EPCGSplitAxis SubdivisionAxis);
 
-	static TArray<FPCGGrammarConstraint> GetConstraintsOnSpline(const UPCGSplineData* SplineData, const UPCGBasePointData* ConstraintPointData);
-	static TArray<FPCGGrammarConstraint> GetConstraintsOnSegment(const UPCGBasePointData* SegmentData, int SegmentIndex, const UPCGBasePointData* ConstraintPointData);
+	static TArray<FPCGGrammarConstraint> GetConstraintsOnSpline(FPCGContext* InContext, const UPCGConstrainGrammarSettings* InSettings, const UPCGSplineData* SplineData, const UPCGBasePointData* ConstraintPointData);
+	static TArray<FPCGGrammarConstraint> GetConstraintsOnSegment(FPCGContext* InContext, const UPCGConstrainGrammarSettings* InSettings, const UPCGBasePointData* SegmentData, int SegmentIndex, const UPCGBasePointData* ConstraintPointData);
 	
 private:
 	/** Calculates the approximate distance along the spline. Accuracy increases with the amount of iterations. */
@@ -140,9 +152,17 @@ private:
 	template<typename T>
 	FPCGMetadataAttribute<T>* CreateAndValidateAttribute(FPCGContext* InContext, TObjectPtr<UPCGMetadata>& Metadata, const FName AttributeName, const T DefaultValue) const;
 	
-	/** Read the values of Attribute in InData for NumValues entries. */
+	/** Read the values of an attribute in InData for NumValues entries. */
+	template<typename T>
+	static void ReadAttributeValues(FPCGContext* InContext, const UPCGData* InData, const FName& AttributeName, int NumValues, TArray<T>& OutValues);
+	
+	/** Read the values of an attribute in InData for NumValues entries. */
 	template<typename T>
 	static void ReadAttributeValues(FPCGContext* InContext, const UPCGData* InData, const FPCGAttributePropertyInputSelector& Attribute, int NumValues, TArray<T>& OutValues);
+	
+	/** Returns vector element X when Axis is X, and so on. */
+	template<typename T>
+	static T GetVectorComponent(const UE::Math::TVector<T>& Vector, EPCGSplitAxis Axis);
 };
 
 template <typename T>
@@ -154,6 +174,14 @@ FPCGMetadataAttribute<T>* FPCGConstrainGrammarElement::CreateAndValidateAttribut
 		PCGLog::Metadata::LogFailToCreateAttributeError<T>(AttributeName, InContext);
 	}
 	return OutAttribute;
+}
+
+template <typename T>
+void FPCGConstrainGrammarElement::ReadAttributeValues(FPCGContext* InContext, const UPCGData* InData, const FName& AttributeName, int NumValues, TArray<T>& OutValues)
+{
+	FPCGAttributePropertyInputSelector Selector;
+	Selector.SetAttributeName(AttributeName);
+	ReadAttributeValues<T>(InContext, InData, Selector, NumValues, OutValues);
 }
 
 template <typename T>
@@ -174,5 +202,17 @@ void FPCGConstrainGrammarElement::ReadAttributeValues(FPCGContext* InContext, co
 	if (!Accessor->GetRange(Values, 0, *AccessorKeys, EPCGAttributeAccessorFlags::AllowBroadcastAndConstructible))
 	{
 		PCGLog::Metadata::LogFailToGetAttributeError<int32>(Selector, Accessor.Get(), InContext);
+	}
+}
+
+template <typename T>
+T FPCGConstrainGrammarElement::GetVectorComponent(const UE::Math::TVector<T>& Vector, EPCGSplitAxis Axis)
+{
+	switch (Axis)
+	{
+	case EPCGSplitAxis::X: return Vector.X;
+	case EPCGSplitAxis::Y: return Vector.Y;
+	case EPCGSplitAxis::Z: return Vector.Z;
+	default: return 0.0f;
 	}
 }
