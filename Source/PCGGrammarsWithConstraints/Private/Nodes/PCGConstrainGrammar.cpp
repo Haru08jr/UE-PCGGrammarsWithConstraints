@@ -48,13 +48,9 @@ TArray<FPCGPinProperties> UPCGConstrainGrammarSettings::OutputPinProperties() co
 	TArray<FPCGPinProperties> PinProperties;
 
 	if (SubdivisionType == Spline)
-	{
 		PinProperties.Emplace(PCGPinConstants::DefaultOutputLabel, EPCGDataType::Spline, false, true);
-	}
 	else
-	{
 		PinProperties.Emplace(PCGPinConstants::DefaultOutputLabel, EPCGDataType::Point, false, true);
-	}
 
 	return PinProperties;
 }
@@ -278,13 +274,9 @@ PCGSubdivisionBase::FModuleInfoMap FPCGConstrainGrammarElement::GetModulesInfoMa
                                                                                   const UPCGParamData*& OutModuleInfoParamData) const
 {
 	if (InSettings->bModuleInfoAsInput)
-	{
 		return GetModulesInfoMap(InContext, InSettings->ModulesInfoAttributeNames, OutModuleInfoParamData);
-	}
 	else
-	{
 		return GetModulesInfoMap(InContext, InSettings->ModulesInfo, OutModuleInfoParamData);
-	}
 }
 
 PCGSubdivisionBase::FModuleInfoMap FPCGConstrainGrammarElement::GetModulesInfoMap(FPCGContext* InContext, const TArray<FPCGSubdivisionSubmodule>& SubmodulesInfo,
