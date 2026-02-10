@@ -12,6 +12,7 @@
 
 #include "PCGConstrainGrammar.generated.h"
 
+struct FPCGSplineStruct;
 class UPCGSplineData;
 class UPCGPolyLineData;
 
@@ -81,7 +82,7 @@ public:
 	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Settings", meta = (EditCondition = "SubdivisionType == SubdivisionType::Segment", EditConditionHides, PCG_Overridable))
 	EPCGSplitAxis SubdivisionAxis = EPCGSplitAxis::X;
 	
-	/** Set it to true to pass the info as attribute set. */
+	/** Set to true to pass the info as attribute set. */
 	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Settings|Modules")
 	bool bModuleInfoAsInput = false;
 
@@ -119,10 +120,16 @@ protected:
 
 	static float GetSegmentLength(const UPCGBasePointData* SegmentData, int SegmentIndex, EPCGSplitAxis SubdivisionAxis);
 
-	static TArray<FPCGGrammarConstraint> GetConstraintsOnSpline(const UPCGPolyLineData* SplineData, const UPCGBasePointData* ConstraintPointData);
+	static TArray<FPCGGrammarConstraint> GetConstraintsOnSpline(const UPCGSplineData* SplineData, const UPCGBasePointData* ConstraintPointData);
 	static TArray<FPCGGrammarConstraint> GetConstraintsOnSegment(const UPCGBasePointData* SegmentData, int SegmentIndex, const UPCGBasePointData* ConstraintPointData);
 	
 private:
+	/** Calculates the approximate distance along the spline. Accuracy increases with the amount of iterations. */
+	static float GetDistanceAlongSpline(const FPCGSplineStruct& Spline, const FVector& WorldPosition, int Iterations = 10);
+	
+	/** Get the position on the spline that's closest to Transform. Returns true if this position is inside Bounds. */
+	static bool SamplePointOnSpline(const FPCGSplineStruct& Spline, const FTransform& Transform, const FBox& Bounds, FVector& OutPosition);
+	
 	/** Read Module infos if necessary and put them into a map */
 	PCGSubdivisionBase::FModuleInfoMap GetModulesInfoMap(FPCGContext* InContext, const UPCGConstrainGrammarSettings* InSettings, const UPCGParamData*& OutModuleInfoParamData) const;
 	// Copied from PCGSubdivisionBase (can't inherit because functions are not exported)
@@ -135,7 +142,7 @@ private:
 	
 	/** Read the values of Attribute in InData for NumValues entries. */
 	template<typename T>
-	static void FPCGConstrainGrammarElement::ReadAttributeValues(FPCGContext* InContext, const UPCGData* InData, const FPCGAttributePropertyInputSelector& Attribute, int NumValues, TArray<T>& OutValues);
+	static void ReadAttributeValues(FPCGContext* InContext, const UPCGData* InData, const FPCGAttributePropertyInputSelector& Attribute, int NumValues, TArray<T>& OutValues);
 };
 
 template <typename T>
