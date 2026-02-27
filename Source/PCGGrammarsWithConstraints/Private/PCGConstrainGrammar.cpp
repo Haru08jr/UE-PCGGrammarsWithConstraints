@@ -4,10 +4,12 @@
 #include "PCGConstrainGrammar.h"
 
 #include "PCGParamData.h"
-#include "ConstrainedGrammarGenerator/public/GrammarConstrainer.h"
 #include "Data/PCGBasePointData.h"
 #include "Data/PCGSplineData.h"
 #include "Helpers/PCGPropertyHelpers.h"
+#include "PCGGrammarsWithConstraints/PCGConstrainedGrammarGenerator/source/public/Generator.hpp"
+#include "PCGGrammarsWithConstraints/PCGConstrainedGrammarGenerator/source/public/automaton/NFACompiler.hpp"
+#include "PCGGrammarsWithConstraints/PCGConstrainedGrammarGenerator/source/public/regex/RegexParser.hpp"
 
 TArray<FPCGPinProperties> UPCGConstrainGrammarSettings::InputPinProperties() const
 {
@@ -64,6 +66,9 @@ FPCGElementPtr UPCGConstrainGrammarSettings::CreateElement() const
 bool FPCGConstrainGrammarElement::ExecuteInternal(FPCGContext* InContext) const
 {
 	TRACE_CPUPROFILER_EVENT_SCOPE(FPCGSubdivideSplineElement::Execute);
+	
+	auto* Context = static_cast<FPCGGrammarConstrainingContext*>(InContext);
+	check(Context);
 
 	const UPCGConstrainGrammarSettings* Settings = InContext->GetInputSettings<UPCGConstrainGrammarSettings>();
 	check(Settings);
@@ -72,8 +77,6 @@ bool FPCGConstrainGrammarElement::ExecuteInternal(FPCGContext* InContext) const
 
 	const UPCGParamData* ModuleInfoParamData = nullptr;
 	const PCGSubdivisionBase::FModuleInfoMap ModulesInfo = GetModulesInfoMap(InContext, Settings, ModuleInfoParamData);
-	
-	auto* GrammarConstrainer = NewObject<UGrammarConstrainer>();
 
 	if (Settings->SubdivisionType == Spline)
 	{
@@ -93,7 +96,7 @@ bool FPCGConstrainGrammarElement::ExecuteInternal(FPCGContext* InContext) const
 
 			if (!Settings->bConstraintsAsInput)
 			{
-				auto ConstrainedString = GrammarConstrainer->GenerateWithConstraints(InContext, Grammar, SplineData->GetLength(), ModulesInfo, Settings->Constraints);
+				auto ConstrainedString = GenerateWithConstraints(Context, Grammar, SplineData->GetLength(), ModulesInfo, Settings->Constraints);
 
 				auto OutSplineData = SplineData->DuplicateData(InContext);
 				Outputs.Emplace_GetRef().Data = OutSplineData;
@@ -107,7 +110,7 @@ bool FPCGConstrainGrammarElement::ExecuteInternal(FPCGContext* InContext) const
 					const UPCGBasePointData* ConstraintPointData = Cast<const UPCGBasePointData>(ConstraintInput.Data);
 					auto Constraints = GetConstraintsOnSpline(InContext, Settings, SplineData, ConstraintPointData);
 
-					auto ConstrainedString = GrammarConstrainer->GenerateWithConstraints(InContext, Grammar, SplineData->GetLength(), ModulesInfo, Constraints);
+					auto ConstrainedString = GenerateWithConstraints(Context, Grammar, SplineData->GetLength(), ModulesInfo, Constraints);
 
 					auto OutSplineData = SplineData->DuplicateData(InContext);
 					Outputs.Emplace_GetRef().Data = OutSplineData;
@@ -138,7 +141,7 @@ bool FPCGConstrainGrammarElement::ExecuteInternal(FPCGContext* InContext) const
 				{
 					auto Grammar = Settings->GrammarSelection.bGrammarAsAttribute ? GrammarStrings[i] : Settings->GrammarSelection.GrammarString;
 
-					auto ConstrainedString = GrammarConstrainer->GenerateWithConstraints(InContext, Grammar, GetSegmentLength(SegmentData, i, Settings->SubdivisionAxis), ModulesInfo, Settings->Constraints);
+					auto ConstrainedString = GenerateWithConstraints(Context, Grammar, GetSegmentLength(SegmentData, i, Settings->SubdivisionAxis), ModulesInfo, Settings->Constraints);
 					GrammarAttribute->SetValue<FString>(OutSegmentData->GetMetadataEntry(i), ConstrainedString);
 				}
 			}
@@ -159,13 +162,71 @@ bool FPCGConstrainGrammarElement::ExecuteInternal(FPCGContext* InContext) const
 						auto Constraints = GetConstraintsOnSegment(InContext, Settings, SegmentData, i, ConstraintPointData);
 
 						auto Grammar = Settings->GrammarSelection.bGrammarAsAttribute ? GrammarStrings[i] : Settings->GrammarSelection.GrammarString;
-						auto ConstrainedString = GrammarConstrainer->GenerateWithConstraints(InContext, Grammar, GetSegmentLength(SegmentData, i, Settings->SubdivisionAxis), ModulesInfo, Constraints);
+						auto ConstrainedString = GenerateWithConstraints(Context, Grammar, GetSegmentLength(SegmentData, i, Settings->SubdivisionAxis), ModulesInfo, Constraints);
 						
 						GrammarAttribute->SetValue<FString>(OutSegmentData->GetMetadataEntry(i), ConstrainedString);
 					}
 				}
 			}
 		}
+	}
+	return true;
+}
+
+FString FPCGConstrainGrammarElement::GenerateWithConstraints(FPCGGrammarConstrainingContext* InContext, const FString& GrammarString, float Length, const PCGSubdivisionBase::FModuleInfoMap& Modules,
+	const TArray<FPCGGrammarConstraint>& Constraints) const
+{
+	std::vector<GenerationConstraint> GenerationConstraints;
+	for (const auto& Constraint : Constraints)
+	{
+		if (!Modules.Contains(FName(Constraint.Symbol.ToString())))
+		{
+			PCGLog::LogErrorOnGraph(FText::Format(FText::FromString("Constraint symbol '{0}' is not included in modules"), Constraint.Symbol), InContext);
+			return "";
+		}
+		GenerationConstraints.emplace_back(FStringToStd(Constraint.Symbol.ToString()), Constraint.Position, Constraint.bHasWidth? Constraint.Width * 0.5f : 0.f);
+	}
+	
+	if (!MakeNFAForGrammar(InContext, GrammarString))
+	{
+		return "";
+	}
+	
+	std::map<std::string, float> Symbols;
+	for (const auto& [ModuleName, Module] : Modules)
+	{
+		Symbols.emplace(FStringToStd(ModuleName.ToString()), Module.Size);
+	}
+	
+	auto result = Generator::generate(Symbols, Length, InContext->ConstructedNFAs[GrammarString], GenerationConstraints);
+	
+	if (!result.isValid())
+	{
+		PCGLog::LogErrorOnGraph(FText::Format(FText::FromString("The given constraints could not be satisfied for grammar '{0}'"), FText::FromString(GrammarString)), InContext);
+		return "";
+	}
+	return StdToFString(result.getGeneratedString());
+}
+
+bool FPCGConstrainGrammarElement::MakeNFAForGrammar(FPCGGrammarConstrainingContext* InContext, const FString& GrammarString)
+{
+	if (!InContext->ConstructedNFAs.Contains(GrammarString))
+	{
+		const RegexParser Parser(FStringToStd(GrammarString));
+		if (!Parser.wasParsingSuccessful())
+		{
+			PCGLog::LogErrorOnGraph(FText::Format(FText::FromString("Grammar ({0}) could not be parsed."), FText::FromString(GrammarString)), InContext);
+			return false;
+		}
+		
+		const NFACompiler Compiler(Parser.getParsedRegex());
+		if (!Compiler.wasConstructionSuccessful())
+		{
+			PCGLog::LogErrorOnGraph(FText::Format(FText::FromString("NFA could not be constructed for Grammar ({0})."), FText::FromString(GrammarString)), InContext);
+			return false;
+		}
+
+		InContext->ConstructedNFAs.Emplace(GrammarString, Compiler.getConstructedNFA());
 	}
 	return true;
 }
@@ -346,4 +407,14 @@ PCGSubdivisionBase::FModuleInfoMap FPCGConstrainGrammarElement::GetModulesInfoMa
 	OutModuleInfoParamData = ParamData;
 
 	return ModulesInfo;
+}
+
+FString FPCGConstrainGrammarElement::StdToFString(const std::string& String)
+{
+	return UTF8_TO_TCHAR(String.c_str());
+}
+
+std::string FPCGConstrainGrammarElement::FStringToStd(const FString& String)
+{
+	return TCHAR_TO_UTF8(*String);
 }

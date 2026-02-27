@@ -2,9 +2,11 @@
 
 #pragma once
 
+#include <string>
+
 #include "CoreMinimal.h"
-#include "GrammarConstrainer.h"
 #include "PCGSettings.h"
+#include "automaton/NFA.hpp"
 #include "Elements/PCGSplitPoints.h"
 #include "Elements/Grammar/PCGSubdivisionBase.h"
 #include "Metadata/PCGMetadata.h"
@@ -16,6 +18,27 @@
 struct FPCGSplineStruct;
 class UPCGSplineData;
 class UPCGPolyLineData;
+
+USTRUCT(BlueprintType)
+struct FPCGGrammarConstraint
+{
+	GENERATED_BODY()
+	/** Symbol in the grammar. */
+	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "")
+	FText Symbol;
+
+	/** Position along the generation shape. */
+	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "")
+	float Position = 100.0;
+
+	/** Position along the generation shape. */
+	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "")
+	bool bHasWidth = false;
+
+	/** Position along the generation shape. */
+	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "", meta=(EditCondition = "bHasWidth"))
+	float Width = 100.0;
+};
 
 USTRUCT(BlueprintType)
 struct FPCGGrammarConstraintAttributeNames
@@ -102,12 +125,29 @@ public:
 	FName OutGrammarAttribute = TEXT("Grammar");
 };
 
-class FPCGConstrainGrammarElement : public IPCGElement
+
+struct FPCGGrammarConstrainingContext : public FPCGContext
+{
+	//TODO add stuff
+	TMap<FString, NFA> ConstructedNFAs;
+};
+
+class FPCGConstrainGrammarElement : public IPCGElementWithCustomContext<FPCGGrammarConstrainingContext>
 {
 protected:
 	virtual bool ExecuteInternal(FPCGContext* InContext) const override;
 
 private:
+	// Grammar constraining
+	FString GenerateWithConstraints(FPCGGrammarConstrainingContext* InContext, const FString& GrammarString, float Length, const PCGSubdivisionBase::FModuleInfoMap& Modules, const TArray<FPCGGrammarConstraint>& Constraints) const;
+	
+	/** 
+	 * If the context does not have a NFA for the given grammar yet, construct one and save it.
+	 * Returns true if the NFA already existed or was created, and false if the creation of the NFA failed.
+	 */
+	static bool MakeNFAForGrammar(FPCGGrammarConstrainingContext* InContext, const FString& GrammarString);
+	
+	
 	// Spline helpers 
 	/** Maps the incoming constraint points onto the spline. */
 	static TArray<FPCGGrammarConstraint> GetConstraintsOnSpline(FPCGContext* InContext, const UPCGConstrainGrammarSettings* InSettings, const UPCGSplineData* SplineData,
@@ -147,15 +187,21 @@ private:
 	template <typename T>
 	static void ReadAttributeValues(FPCGContext* InContext, const UPCGData* InData, const FPCGAttributePropertyInputSelector& Attribute, int NumValues, TArray<T>& OutValues);
 
+	//Additional helper functions
 	/** Returns vector element X when Axis is X, and so on. */
 	template <typename T>
 	static T GetVectorComponent(const UE::Math::TVector<T>& Vector, EPCGSplitAxis Axis);
+	
+	/** Conversion function from std::string to FString */ 
+	static FString StdToFString(const std::string& String);
+	/** Conversion function from std::string to FString */ 
+	static std::string FStringToStd(const FString& String);
 };
 
 template <typename T>
 FPCGMetadataAttribute<T>* FPCGConstrainGrammarElement::CreateAndValidateAttribute(FPCGContext* InContext, TObjectPtr<UPCGMetadata>& Metadata, const FName AttributeName, const T DefaultValue) const
 {
-	auto OutAttribute = Metadata->FindOrCreateAttribute<T>(AttributeName, DefaultValue, false, true);
+	auto OutAttribute = Metadata->FindOrCreateAttribute<T>(AttributeName, DefaultValue, true, true);
 	if (!OutAttribute)
 	{
 		PCGLog::Metadata::LogFailToCreateAttributeError<T>(AttributeName, InContext);

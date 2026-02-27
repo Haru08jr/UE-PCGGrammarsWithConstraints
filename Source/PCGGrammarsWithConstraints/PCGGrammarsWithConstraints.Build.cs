@@ -1,5 +1,6 @@
 // Copyright Epic Games, Inc. All Rights Reserved.
 
+using System.IO;
 using UnrealBuildTool;
 
 public class PCGGrammarsWithConstraints : ModuleRules
@@ -10,7 +11,8 @@ public class PCGGrammarsWithConstraints : ModuleRules
 		
 		PublicIncludePaths.AddRange(
 			new string[] {
-				// ... add public include paths required here ...
+					Path.Combine(ModuleDirectory, "PCGConstrainedGrammarGenerator/source/public"),
+					Path.Combine(ModuleDirectory, "PCGConstrainedGrammarGenerator/libraries")
 			}
 			);
 				
@@ -25,7 +27,7 @@ public class PCGGrammarsWithConstraints : ModuleRules
 		PublicDependencyModuleNames.AddRange(
 			new string[]
 			{
-				"Core", "PCG", "ConstrainedGrammarGenerator"
+				"Core", "PCG"
 				// ... add other public dependencies that you statically link with here ...
 			}
 			);
@@ -38,8 +40,7 @@ public class PCGGrammarsWithConstraints : ModuleRules
 				"Engine",
 				"Slate",
 				"SlateCore",
-				"PCG", 
-				"ConstrainedGrammarGenerator"
+				"PCG"
 				// ... add private dependencies that you statically link with here ...	
 			}
 			);

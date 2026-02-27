@@ -19,11 +19,6 @@
 			"Name": "PCGGrammarsWithConstraints",
 			"Type": "Runtime",
 			"LoadingPhase": "Default"
-		},
-		{
-			"Name": "ConstrainedGrammarGenerator",
-			"Type": "Runtime",
-			"LoadingPhase": "Default"
 		}
 	],
 	"Plugins": [
