@@ -128,8 +128,8 @@ public:
 
 struct FPCGGrammarConstrainingContext : public FPCGContext
 {
-	//TODO add stuff
 	TMap<FString, NFA> ConstructedNFAs;
+	PCGSubdivisionBase::FModuleInfoMap ModulesInfo;
 };
 
 class FPCGConstrainGrammarElement : public IPCGElementWithCustomContext<FPCGGrammarConstrainingContext>
@@ -139,7 +139,7 @@ protected:
 
 private:
 	// Grammar constraining
-	FString GenerateWithConstraints(FPCGGrammarConstrainingContext* InContext, const FString& GrammarString, float Length, const PCGSubdivisionBase::FModuleInfoMap& Modules, const TArray<FPCGGrammarConstraint>& Constraints) const;
+	static FString GenerateWithConstraints(FPCGGrammarConstrainingContext* Context, const FString& GrammarString, float Length, const TArray<FPCGGrammarConstraint>& Constraints);
 	
 	/** 
 	 * If the context does not have a NFA for the given grammar yet, construct one and save it.
@@ -177,7 +177,7 @@ private:
 
 	/** Create a new attribute in Metadata and fill all entries with DefaultValue. */
 	template <typename T>
-	FPCGMetadataAttribute<T>* CreateAndValidateAttribute(FPCGContext* InContext, TObjectPtr<UPCGMetadata>& Metadata, const FName AttributeName, const T DefaultValue) const;
+	FPCGMetadataAttribute<T>* CreateOrOverwriteAttribute(FPCGContext* InContext, TObjectPtr<UPCGMetadata>& Metadata, const FName AttributeName, const T DefaultValue) const;
 
 	/** Read the values of an attribute in InData for NumValues entries. */
 	template <typename T>
@@ -199,13 +199,14 @@ private:
 };
 
 template <typename T>
-FPCGMetadataAttribute<T>* FPCGConstrainGrammarElement::CreateAndValidateAttribute(FPCGContext* InContext, TObjectPtr<UPCGMetadata>& Metadata, const FName AttributeName, const T DefaultValue) const
+FPCGMetadataAttribute<T>* FPCGConstrainGrammarElement::CreateOrOverwriteAttribute(FPCGContext* InContext, TObjectPtr<UPCGMetadata>& Metadata, const FName AttributeName, const T DefaultValue) const
 {
-	auto OutAttribute = Metadata->FindOrCreateAttribute<T>(AttributeName, DefaultValue, true, true);
+	auto* OutAttribute = Metadata->FindOrCreateAttribute<T>(AttributeName, DefaultValue, true, true);
 	if (!OutAttribute)
 	{
 		PCGLog::Metadata::LogFailToCreateAttributeError<T>(AttributeName, InContext);
 	}
+	OutAttribute->SetDefaultValue(DefaultValue);
 	return OutAttribute;
 }
 
