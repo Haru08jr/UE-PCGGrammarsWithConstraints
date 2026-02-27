@@ -210,7 +210,7 @@ FString FPCGConstrainGrammarElement::GenerateWithConstraints(FPCGGrammarConstrai
 	if (!result.isValid())
 	{
 		PCGLog::LogErrorOnGraph(FText::Format(FText::FromString("The given constraints could not be satisfied for grammar '{0}'"), FText::FromString(GrammarString)), Context);
-		return "";
+		return GrammarString;
 	}
 	return StdToFString(result.getGeneratedString());
 }
