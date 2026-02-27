@@ -25,7 +25,7 @@ public class PCGGrammarsWithConstraints : ModuleRules
 		PublicDependencyModuleNames.AddRange(
 			new string[]
 			{
-				"Core", "PCG",
+				"Core", "PCG", "ConstrainedGrammarGenerator"
 				// ... add other public dependencies that you statically link with here ...
 			}
 			);
@@ -38,7 +38,8 @@ public class PCGGrammarsWithConstraints : ModuleRules
 				"Engine",
 				"Slate",
 				"SlateCore",
-				"PCG"
+				"PCG", 
+				"ConstrainedGrammarGenerator"
 				// ... add private dependencies that you statically link with here ...	
 			}
 			);

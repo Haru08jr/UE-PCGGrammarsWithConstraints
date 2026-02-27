@@ -3,6 +3,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "GrammarConstrainer.h"
 #include "PCGSettings.h"
 #include "Elements/PCGSplitPoints.h"
 #include "Elements/Grammar/PCGSubdivisionBase.h"
@@ -15,27 +16,6 @@
 struct FPCGSplineStruct;
 class UPCGSplineData;
 class UPCGPolyLineData;
-
-USTRUCT(BlueprintType)
-struct FPCGGrammarConstraint
-{
-	GENERATED_BODY()
-	/** Symbol in the grammar. */
-	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "")
-	FText Symbol;
-
-	/** Position along the generation shape. */
-	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "")
-	double Position = 100.0;
-
-	/** Position along the generation shape. */
-	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "")
-	bool bHasWidth = false;
-
-	/** Position along the generation shape. */
-	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "", meta=(EditCondition = "bHasWidth"))
-	double Width = 100.0;
-};
 
 USTRUCT(BlueprintType)
 struct FPCGGrammarConstraintAttributeNames
@@ -126,8 +106,6 @@ class FPCGConstrainGrammarElement : public IPCGElement
 {
 protected:
 	virtual bool ExecuteInternal(FPCGContext* InContext) const override;
-
-	FString ConstrainGrammar(const FString& GrammarString, float Length, const PCGSubdivisionBase::FModuleInfoMap& Modules, const TArray<FPCGGrammarConstraint> Constraints) const;
 
 private:
 	// Spline helpers 

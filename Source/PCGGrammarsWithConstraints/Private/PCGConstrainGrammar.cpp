@@ -1,9 +1,10 @@
 ﻿// Fill out your copyright notice in the Description page of Project Settings.
 
 
-#include "Nodes/PCGConstrainGrammar.h"
+#include "PCGConstrainGrammar.h"
 
 #include "PCGParamData.h"
+#include "ConstrainedGrammarGenerator/public/GrammarConstrainer.h"
 #include "Data/PCGBasePointData.h"
 #include "Data/PCGSplineData.h"
 #include "Helpers/PCGPropertyHelpers.h"
@@ -71,6 +72,8 @@ bool FPCGConstrainGrammarElement::ExecuteInternal(FPCGContext* InContext) const
 
 	const UPCGParamData* ModuleInfoParamData = nullptr;
 	const PCGSubdivisionBase::FModuleInfoMap ModulesInfo = GetModulesInfoMap(InContext, Settings, ModuleInfoParamData);
+	
+	auto* GrammarConstrainer = NewObject<UGrammarConstrainer>();
 
 	if (Settings->SubdivisionType == Spline)
 	{
@@ -90,7 +93,7 @@ bool FPCGConstrainGrammarElement::ExecuteInternal(FPCGContext* InContext) const
 
 			if (!Settings->bConstraintsAsInput)
 			{
-				auto ConstrainedString = ConstrainGrammar(Grammar, SplineData->GetLength(), ModulesInfo, Settings->Constraints);
+				auto ConstrainedString = GrammarConstrainer->GenerateWithConstraints(InContext, Grammar, SplineData->GetLength(), ModulesInfo, Settings->Constraints);
 
 				auto OutSplineData = SplineData->DuplicateData(InContext);
 				Outputs.Emplace_GetRef().Data = OutSplineData;
@@ -104,7 +107,7 @@ bool FPCGConstrainGrammarElement::ExecuteInternal(FPCGContext* InContext) const
 					const UPCGBasePointData* ConstraintPointData = Cast<const UPCGBasePointData>(ConstraintInput.Data);
 					auto Constraints = GetConstraintsOnSpline(InContext, Settings, SplineData, ConstraintPointData);
 
-					auto ConstrainedString = ConstrainGrammar(Grammar, SplineData->GetLength(), ModulesInfo, Constraints);
+					auto ConstrainedString = GrammarConstrainer->GenerateWithConstraints(InContext, Grammar, SplineData->GetLength(), ModulesInfo, Constraints);
 
 					auto OutSplineData = SplineData->DuplicateData(InContext);
 					Outputs.Emplace_GetRef().Data = OutSplineData;
@@ -135,7 +138,7 @@ bool FPCGConstrainGrammarElement::ExecuteInternal(FPCGContext* InContext) const
 				{
 					auto Grammar = Settings->GrammarSelection.bGrammarAsAttribute ? GrammarStrings[i] : Settings->GrammarSelection.GrammarString;
 
-					auto ConstrainedString = ConstrainGrammar(Grammar, GetSegmentLength(SegmentData, i, Settings->SubdivisionAxis), ModulesInfo, Settings->Constraints);
+					auto ConstrainedString = GrammarConstrainer->GenerateWithConstraints(InContext, Grammar, GetSegmentLength(SegmentData, i, Settings->SubdivisionAxis), ModulesInfo, Settings->Constraints);
 					GrammarAttribute->SetValue<FString>(OutSegmentData->GetMetadataEntry(i), ConstrainedString);
 				}
 			}
@@ -156,7 +159,8 @@ bool FPCGConstrainGrammarElement::ExecuteInternal(FPCGContext* InContext) const
 						auto Constraints = GetConstraintsOnSegment(InContext, Settings, SegmentData, i, ConstraintPointData);
 
 						auto Grammar = Settings->GrammarSelection.bGrammarAsAttribute ? GrammarStrings[i] : Settings->GrammarSelection.GrammarString;
-						auto ConstrainedString = ConstrainGrammar(Grammar, GetSegmentLength(SegmentData, i, Settings->SubdivisionAxis), ModulesInfo, Constraints);
+						auto ConstrainedString = GrammarConstrainer->GenerateWithConstraints(InContext, Grammar, GetSegmentLength(SegmentData, i, Settings->SubdivisionAxis), ModulesInfo, Constraints);
+						
 						GrammarAttribute->SetValue<FString>(OutSegmentData->GetMetadataEntry(i), ConstrainedString);
 					}
 				}
@@ -164,13 +168,6 @@ bool FPCGConstrainGrammarElement::ExecuteInternal(FPCGContext* InContext) const
 		}
 	}
 	return true;
-}
-
-FString FPCGConstrainGrammarElement::ConstrainGrammar(const FString& GrammarString, float Length, const PCGSubdivisionBase::FModuleInfoMap& Modules,
-                                                      const TArray<FPCGGrammarConstraint> Constraints) const
-{
-	// TODO use implementation
-	return GrammarString;
 }
 
 float FPCGConstrainGrammarElement::GetSegmentLength(const UPCGBasePointData* SegmentData, int SegmentIndex, EPCGSplitAxis SubdivisionAxis)

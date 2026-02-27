@@ -1,0 +1,3 @@
+[submodule "Source/ConstrainedGrammarGenerator/PCGConstrainedGrammarGenerator"]
+	path = Source/ConstrainedGrammarGenerator/PCGConstrainedGrammarGenerator
+	url = https://github.com/Haru08jr/PCGConstrainedGrammarGenerator.git
