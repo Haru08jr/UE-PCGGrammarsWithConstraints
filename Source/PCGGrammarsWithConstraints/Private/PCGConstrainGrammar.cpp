@@ -258,7 +258,11 @@ TArray<FPCGGrammarConstraint> FPCGConstrainGrammarElement::GetConstraintsOnSplin
 	{
 		FVector PositionOnSpline;
 		if (!SamplePointOnSpline(SplineData->SplineStruct, ConstraintPointData->GetTransform(i), FBox(ConstraintPointData->GetBoundsMin(i), ConstraintPointData->GetBoundsMax(i)), PositionOnSpline))
+		{
+			PCGLog::LogWarningOnGraph(FText::Format(FText::FromString("Constraint symbol '{0}' is outside of the input shape, will be ignored."),
+													FText::FromString(Symbols[i])), InContext);
 			continue;
+		}
 
 		auto Distance = GetDistanceAlongSpline(SplineData->SplineStruct, PositionOnSpline);
 		if (Distance < 0.0f || Distance > SplineData->GetLength())
@@ -278,8 +282,7 @@ float FPCGConstrainGrammarElement::GetDistanceAlongSpline(const FPCGSplineStruct
 	auto HigherBound = Spline.GetDistanceAlongSplineAtSplinePoint(ClosestSplinePointKey + 1);
 
 	auto DistanceEstimate = (LowerBound + HigherBound) * 0.5f;
-
-	// TODO check if this actually works
+	
 	for (auto i = 0; i < Iterations; ++i)
 	{
 		auto MiddleInputKey = Spline.GetInputKeyAtDistanceAlongSpline(DistanceEstimate);
