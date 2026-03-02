@@ -74,9 +74,23 @@ bool FPCGConstrainGrammarElement::ExecuteInternal(FPCGContext* InContext) const
 
 	auto* Context = static_cast<FPCGGrammarConstrainingContext*>(InContext);
 	check(Context);
-
-	const UPCGParamData* ModuleInfoParamData = nullptr;
-	Context->ModulesInfo = GetModulesInfoMap(InContext, Settings, ModuleInfoParamData);
+	
+	auto Modules = GetModules(InContext, Settings);
+	if (Modules.IsEmpty())
+	{
+		PCGLog::LogErrorOnGraph(FText::FromString("No modules found!"), InContext);
+		return true;
+	}
+	for (const auto& Module : Modules)
+	{
+		auto symbol = FStringToStd(Module.Symbol.ToString());
+		if (Context->ModuleMap.contains(symbol))
+		{
+			PCGLog::LogWarningOnGraph(FText::Format(PCGConstrainGrammar::Constants::DuplicatedSymbolText, FText::FromName(Module.Symbol)), InContext);
+			continue;
+		}
+		Context->ModuleMap.emplace(symbol, GrammarModule{symbol, static_cast<float>(Module.Size), Module.bSpawnOnlyWithConstraint});
+	}
 
 	if (Settings->SubdivisionType == Spline)
 	{
@@ -178,34 +192,24 @@ FString FPCGConstrainGrammarElement::GenerateWithConstraints(FPCGGrammarConstrai
 	std::vector<GenerationConstraint> GenerationConstraints;
 	for (const auto& Constraint : Constraints)
 	{
-		if (!Context->ModulesInfo.Contains(FName(Constraint.Symbol.ToString())))
+		auto ConstraintSymbol = FStringToStd(Constraint.Symbol.ToString());
+		if (!Context->ModuleMap.contains(ConstraintSymbol))
 		{
 			PCGLog::LogWarningOnGraph(FText::Format(FText::FromString("Constraint symbol '{0}' at position {1} is not included in modules, will be ignored."),
 			                                        Constraint.Symbol, Constraint.Position), Context);
 		}
-		else if (Constraint.Position > Length)
-		{
-			PCGLog::LogWarningOnGraph(FText::Format(FText::FromString("Constraint symbol '{0}' at position {1} is outside of the input shape, will be ignored."),
-			                                        Constraint.Symbol, Constraint.Position), Context);
-		}
 		else
 		{
-			GenerationConstraints.emplace_back(FStringToStd(Constraint.Symbol.ToString()), Constraint.Position, Constraint.bHasWidth ? Constraint.Width * 0.5f : 0.f);
+			GenerationConstraints.emplace_back(ConstraintSymbol, Constraint.Position, Constraint.bHasWidth ? Constraint.Width * 0.5f : 0.f);
 		}
 	}
 
 	if (!MakeNFAForGrammar(Context, GrammarString))
 	{
-		return "";
+		return GrammarString;
 	}
 
-	std::map<std::string, float> Symbols;
-	for (const auto& [ModuleName, Module] : Context->ModulesInfo)
-	{
-		Symbols.emplace(FStringToStd(ModuleName.ToString()), Module.Size);
-	}
-
-	auto result = Generator::generate(Symbols, Length, Context->ConstructedNFAs[GrammarString], GenerationConstraints);
+	auto result = Generator::generate(Context->ModuleMap, Length, Context->ConstructedNFAs[GrammarString], GenerationConstraints);
 
 	if (!result.isValid())
 	{
@@ -345,85 +349,40 @@ TArray<FPCGGrammarConstraint> FPCGConstrainGrammarElement::GetConstraintsOnSegme
 	return Constraints;
 }
 
-PCGSubdivisionBase::FModuleInfoMap FPCGConstrainGrammarElement::GetModulesInfoMap(FPCGContext* InContext, const UPCGConstrainGrammarSettings* InSettings,
-                                                                                  const UPCGParamData*& OutModuleInfoParamData) const
+TArray<FPCGConstrainedGrammarModule> FPCGConstrainGrammarElement::GetModules(FPCGContext* InContext, const UPCGConstrainGrammarSettings* InSettings)
 {
-	if (InSettings->bModuleInfoAsInput)
-		return GetModulesInfoMap(InContext, InSettings->ModulesInfoAttributeNames, OutModuleInfoParamData);
-	else
-		return GetModulesInfoMap(InContext, InSettings->ModulesInfo, OutModuleInfoParamData);
-}
-
-PCGSubdivisionBase::FModuleInfoMap FPCGConstrainGrammarElement::GetModulesInfoMap(FPCGContext* InContext, const TArray<FPCGSubdivisionSubmodule>& SubmodulesInfo,
-                                                                                  const UPCGParamData*& OutModuleInfoParamData) const
-{
-	PCGSubdivisionBase::FModuleInfoMap ModulesInfo;
-	OutModuleInfoParamData = nullptr;
-
-	ModulesInfo.Reserve(SubmodulesInfo.Num());
-	for (const FPCGSubdivisionSubmodule& SubdivisionModule : SubmodulesInfo)
-	{
-		if (ModulesInfo.Contains(SubdivisionModule.Symbol))
-		{
-			PCGLog::LogWarningOnGraph(FText::Format(PCGConstrainGrammar::Constants::DuplicatedSymbolText, FText::FromName(SubdivisionModule.Symbol)), InContext);
-			continue;
-		}
-
-		ModulesInfo.Emplace(SubdivisionModule.Symbol, SubdivisionModule);
-	}
-
-	return ModulesInfo;
-}
-
-PCGSubdivisionBase::FModuleInfoMap FPCGConstrainGrammarElement::GetModulesInfoMap(FPCGContext* InContext, const FPCGSubdivisionModuleAttributeNames& InSubdivisionModuleAttributeNames,
-                                                                                  const UPCGParamData*& OutModuleInfoParamData) const
-{
-	PCGSubdivisionBase::FModuleInfoMap ModulesInfo;
-	OutModuleInfoParamData = nullptr;
-
+	if (!InSettings->bModuleInfoAsInput)
+		return InSettings->ModulesInfo;
+	
 	const TArray<FPCGTaggedData> ModulesInfoInputs = InContext->InputData.GetInputsByPin(PCGSubdivisionBase::Constants::ModulesInfoPinLabel);
 
 	if (ModulesInfoInputs.IsEmpty())
 	{
 		PCGLog::LogWarningOnGraph(FText::FromString("No data was found on the module info pin."), InContext);
-		return ModulesInfo;
+		return {};
 	}
-
+	
 	const UPCGParamData* ParamData = Cast<UPCGParamData>(ModulesInfoInputs[0].Data);
 	if (!ParamData)
 	{
 		PCGLog::LogWarningOnGraph(FText::FromString("Module info input is not of type attribute set."), InContext);
-		return ModulesInfo;
+		return {};
 	}
 
 	TMap<FName, TTuple<FName, bool>> PropertyNameMapping;
-	PropertyNameMapping.Emplace(GET_MEMBER_NAME_CHECKED(FPCGSubdivisionSubmodule, Symbol), {InSubdivisionModuleAttributeNames.SymbolAttributeName, /*bCanBeDefaulted=*/false});
-	PropertyNameMapping.Emplace(GET_MEMBER_NAME_CHECKED(FPCGSubdivisionSubmodule, Size), {InSubdivisionModuleAttributeNames.SizeAttributeName, /*bCanBeDefaulted=*/false});
-	PropertyNameMapping.Emplace(GET_MEMBER_NAME_CHECKED(FPCGSubdivisionSubmodule, bScalable), {
-		                            InSubdivisionModuleAttributeNames.ScalableAttributeName, /*bCanBeDefaulted=*/!InSubdivisionModuleAttributeNames.bProvideScalable
-	                            });
-	PropertyNameMapping.Emplace(GET_MEMBER_NAME_CHECKED(FPCGSubdivisionSubmodule, DebugColor), {
-		                            InSubdivisionModuleAttributeNames.DebugColorAttributeName, /*bCanBeDefaulted=*/!InSubdivisionModuleAttributeNames.bProvideDebugColor
-	                            });
+	PropertyNameMapping.Emplace(GET_MEMBER_NAME_CHECKED(FPCGConstrainedGrammarModule, Symbol), {InSettings->ModulesInfoAttributeNames.SymbolAttributeName, /*bCanBeDefaulted=*/false});
+	PropertyNameMapping.Emplace(GET_MEMBER_NAME_CHECKED(FPCGConstrainedGrammarModule, Size), {InSettings->ModulesInfoAttributeNames.SizeAttributeName, /*bCanBeDefaulted=*/false});
+	PropertyNameMapping.Emplace(GET_MEMBER_NAME_CHECKED(FPCGConstrainedGrammarModule, bScalable), {
+									InSettings->ModulesInfoAttributeNames.ScalableAttributeName, /*bCanBeDefaulted=*/!InSettings->ModulesInfoAttributeNames.bProvideScalable
+								});
+	PropertyNameMapping.Emplace(GET_MEMBER_NAME_CHECKED(FPCGConstrainedGrammarModule, DebugColor), {
+									InSettings->ModulesInfoAttributeNames.DebugColorAttributeName, /*bCanBeDefaulted=*/!InSettings->ModulesInfoAttributeNames.bProvideDebugColor
+								});
+	PropertyNameMapping.Emplace(GET_MEMBER_NAME_CHECKED(FPCGConstrainedGrammarModule, bSpawnOnlyWithConstraint), {
+									InSettings->ModulesInfoAttributeNames.SpawnOnlyWithConstraintAttributeName, /*bCanBeDefaulted=*/!InSettings->ModulesInfoAttributeNames.bProvideSpawnOnlyWithConstraint
+								});
 
-	const TArray<FPCGSubdivisionSubmodule> AllModules = PCGPropertyHelpers::ExtractAttributeSetAsArrayOfStructs<FPCGSubdivisionSubmodule>(ParamData, &PropertyNameMapping, InContext);
-
-	ModulesInfo.Reserve(AllModules.Num());
-
-	for (int32 i = 0; i < AllModules.Num(); ++i)
-	{
-		if (ModulesInfo.Contains(AllModules[i].Symbol))
-		{
-			PCGLog::LogWarningOnGraph(FText::Format(PCGConstrainGrammar::Constants::DuplicatedSymbolText, FText::FromName(AllModules[i].Symbol)), InContext);
-			continue;
-		}
-
-		ModulesInfo.Emplace(AllModules[i].Symbol, std::move(AllModules[i]));
-	}
-
-	OutModuleInfoParamData = ParamData;
-
-	return ModulesInfo;
+	return PCGPropertyHelpers::ExtractAttributeSetAsArrayOfStructs<FPCGConstrainedGrammarModule>(ParamData, &PropertyNameMapping, InContext);
 }
 
 FString FPCGConstrainGrammarElement::StdToFString(const std::string& String)

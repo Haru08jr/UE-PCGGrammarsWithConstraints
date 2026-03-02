@@ -5,8 +5,8 @@
 #include <string>
 
 #include "CoreMinimal.h"
+#include "PCGConstrainGrammarStructs.h"
 #include "PCGSettings.h"
-#include "automaton/NFA.hpp"
 #include "Elements/PCGSplitPoints.h"
 #include "Elements/Grammar/PCGSubdivisionBase.h"
 #include "Metadata/PCGMetadata.h"
@@ -18,44 +18,6 @@
 struct FPCGSplineStruct;
 class UPCGSplineData;
 class UPCGPolyLineData;
-
-USTRUCT(BlueprintType)
-struct FPCGGrammarConstraint
-{
-	GENERATED_BODY()
-	/** Symbol in the grammar. */
-	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "")
-	FText Symbol;
-
-	/** Position along the generation shape. */
-	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "")
-	float Position = 100.0;
-
-	/** Position along the generation shape. */
-	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "")
-	bool bHasWidth = false;
-
-	/** Position along the generation shape. */
-	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "", meta=(EditCondition = "bHasWidth"))
-	float Width = 100.0;
-};
-
-USTRUCT(BlueprintType)
-struct FPCGGrammarConstraintAttributeNames
-{
-	GENERATED_BODY()
-
-	/** Mandatory. Expected type: FName. */
-	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "")
-	FName SymbolAttributeName = PCGSubdivisionBase::Constants::SymbolAttributeName;
-};
-
-UENUM()
-enum SubdivisionType
-{
-	Spline,
-	Segment
-};
 
 namespace PCGConstrainGrammar::Constants
 {
@@ -93,18 +55,18 @@ public:
 	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Settings", meta = (EditCondition = "SubdivisionType == SubdivisionType::Segment", EditConditionHides, PCG_Overridable))
 	EPCGSplitAxis SubdivisionAxis = EPCGSplitAxis::X;
 
-	/** Set to true to pass the info as attribute set. */
+	/** Set to true to pass the module info as attribute set. */
 	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Settings|Modules")
 	bool bModuleInfoAsInput = false;
 
 	/** Fixed array of modules used for the subdivision. */
 	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Settings|Modules", meta = (EditCondition = "!bModuleInfoAsInput", EditConditionHides, DisplayAfter = bModuleInfoAsInput))
-	TArray<FPCGSubdivisionSubmodule> ModulesInfo;
+	TArray<FPCGConstrainedGrammarModule> ModulesInfo;
 
-	/** Fixed array of modules used for the subdivision. */
+	/** Names of the module attributes. */
 	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Settings|Modules",
 		meta = (EditCondition = "bModuleInfoAsInput", EditConditionHides, DisplayAfter = bModuleInfoAsInput, DisplayName = "Attribute Names for Module Info"))
-	FPCGSubdivisionModuleAttributeNames ModulesInfoAttributeNames;
+	FPCGConstrainedGrammarModuleAttributeNames ModulesInfoAttributeNames;
 
 	/** If true, takes in the constraint positions as points. */
 	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Settings|Constraints", meta = (PCG_Overridable))
@@ -123,13 +85,6 @@ public:
 	/** Name of the grammar output attribute. */
 	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Settings", meta = (PCG_Overridable))
 	FName OutGrammarAttribute = TEXT("Grammar");
-};
-
-
-struct FPCGGrammarConstrainingContext : public FPCGContext
-{
-	TMap<FString, NFA> ConstructedNFAs;
-	PCGSubdivisionBase::FModuleInfoMap ModulesInfo;
 };
 
 class FPCGConstrainGrammarElement : public IPCGElementWithCustomContext<FPCGGrammarConstrainingContext>
@@ -168,13 +123,9 @@ private:
 	static float GetSegmentLength(const UPCGBasePointData* SegmentData, int SegmentIndex, EPCGSplitAxis SubdivisionAxis);
 
 	// Attribute access helpers
-	/** Read Module infos if necessary and put them into a map */
-	PCGSubdivisionBase::FModuleInfoMap GetModulesInfoMap(FPCGContext* InContext, const UPCGConstrainGrammarSettings* InSettings, const UPCGParamData*& OutModuleInfoParamData) const;
-	// Copied from PCGSubdivisionBase (can't inherit because functions are not exported)
-	PCGSubdivisionBase::FModuleInfoMap GetModulesInfoMap(FPCGContext* InContext, const TArray<FPCGSubdivisionSubmodule>& SubmodulesInfo, const UPCGParamData*& OutModuleInfoParamData) const;
-	PCGSubdivisionBase::FModuleInfoMap GetModulesInfoMap(FPCGContext* InContext, const FPCGSubdivisionModuleAttributeNames& InSubdivisionModuleAttributeNames,
-	                                                     const UPCGParamData*& OutModuleInfoParamData) const;
-
+	/** Read module info from input if necessary. */
+	static TArray<FPCGConstrainedGrammarModule> GetModules(FPCGContext* InContext, const UPCGConstrainGrammarSettings* InSettings);
+	
 	/** Create a new attribute in Metadata and fill all entries with DefaultValue. */
 	template <typename T>
 	FPCGMetadataAttribute<T>* CreateOrOverwriteAttribute(FPCGContext* InContext, TObjectPtr<UPCGMetadata>& Metadata, const FName AttributeName, const T DefaultValue) const;
@@ -187,7 +138,7 @@ private:
 	template <typename T>
 	static void ReadAttributeValues(FPCGContext* InContext, const UPCGData* InData, const FPCGAttributePropertyInputSelector& Attribute, int NumValues, TArray<T>& OutValues);
 
-	//Additional helper functions
+	// Additional helper functions
 	/** Returns vector element X when Axis is X, and so on. */
 	template <typename T>
 	static T GetVectorComponent(const UE::Math::TVector<T>& Vector, EPCGSplitAxis Axis);
