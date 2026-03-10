@@ -1,7 +1,4 @@
-﻿// Fill out your copyright notice in the Description page of Project Settings.
-
-
-#include "PCGConstrainGrammar.h"
+﻿#include "PCGConstrainGrammar.h"
 
 #include "PCGParamData.h"
 #include "Data/PCGBasePointData.h"
@@ -15,10 +12,9 @@ TArray<FPCGPinProperties> UPCGConstrainGrammarSettings::InputPinProperties() con
 {
 	TArray<FPCGPinProperties> PinProperties;
 
-
 	if (SubdivisionType == Spline)
 	{
-		FPCGPinProperties& InShapePin = PinProperties.Emplace_GetRef(PCGPinConstants::DefaultInputLabel, EPCGDataType::PolyLine, false, true,
+		FPCGPinProperties& InShapePin = PinProperties.Emplace_GetRef(PCGPinConstants::DefaultInputLabel, EPCGDataType::Spline, false, true,
 		                                                             FText::FromString("The Spline on which the Grammar will be generated. Should match the In pin of Subdivide Spline."));
 		InShapePin.SetRequiredPin();
 	}
@@ -32,14 +28,16 @@ TArray<FPCGPinProperties> UPCGConstrainGrammarSettings::InputPinProperties() con
 	if (bConstraintsAsInput)
 	{
 		FPCGPinProperties& InConstraintsPin = PinProperties.Emplace_GetRef(PCGConstrainGrammar::Constants::ConstraintsPinLabel, EPCGDataType::Point,
-		                                                                   false, true, FText::FromString("The Constraints to apply to the Grammar."));
+		                                                                   false, true, FText::FromString(
+			                                                                   "The Constraints to apply to the Grammar. Should have the attributes specified in Constraint Attribute Names."));
 		InConstraintsPin.SetRequiredPin();
 	}
 
 	if (bModuleInfoAsInput)
 	{
 		FPCGPinProperties& ModuleInfoPin = PinProperties.Emplace_GetRef(PCGSubdivisionBase::Constants::ModulesInfoPinLabel, EPCGDataType::Param,
-		                                                                false, true, FText::FromString("The Modules used in the Grammar."));
+		                                                                false, true, FText::FromString(
+			                                                                "The Modules used in the Grammar. Should have the attributes specified in Module Attribute Names."));
 		ModuleInfoPin.SetRequiredPin();
 	}
 
@@ -74,7 +72,8 @@ bool FPCGConstrainGrammarElement::ExecuteInternal(FPCGContext* InContext) const
 
 	auto* Context = static_cast<FPCGGrammarConstrainingContext*>(InContext);
 	check(Context);
-	
+
+	// Read and check modules
 	auto Modules = GetModules(InContext, Settings);
 	if (Modules.IsEmpty())
 	{
@@ -89,9 +88,10 @@ bool FPCGConstrainGrammarElement::ExecuteInternal(FPCGContext* InContext) const
 			PCGLog::LogWarningOnGraph(FText::Format(PCGConstrainGrammar::Constants::DuplicatedSymbolText, FText::FromName(Module.Symbol)), InContext);
 			continue;
 		}
-		if (Module.Size <= 0){
+		if (Module.Size <= 0)
+		{
 			PCGLog::LogWarningOnGraph(FText::Format(FText::FromString("Module {0} has size 0, will be ignored."), FText::FromName(Module.Symbol)), InContext);
-        	continue;
+			continue;
 		}
 		Context->ModuleMap.emplace(symbol, GrammarModule{symbol, static_cast<float>(Module.Size), Module.bSpawnOnlyWithConstraint});
 	}
@@ -116,12 +116,14 @@ bool FPCGConstrainGrammarElement::ExecuteInternal(FPCGContext* InContext) const
 			{
 				auto ConstrainedString = GenerateWithConstraints(Context, Grammar, SplineData->GetLength(), Settings->Constraints);
 
+				// copy input data to output and add Grammar attribute
 				auto OutSplineData = SplineData->DuplicateData(InContext);
 				Outputs.Emplace_GetRef().Data = OutSplineData;
 				CreateOrOverwriteAttribute(InContext, OutSplineData->Metadata, Settings->OutGrammarAttribute, ConstrainedString);
 			}
 			else
 			{
+				// if the constraints are provided through input pins, iterate over all constraint sets
 				TArray<FPCGTaggedData> ConstraintInputs = InContext->InputData.GetInputsByPin(PCGConstrainGrammar::Constants::ConstraintsPinLabel);
 				for (const auto& ConstraintInput : ConstraintInputs)
 				{
@@ -130,6 +132,7 @@ bool FPCGConstrainGrammarElement::ExecuteInternal(FPCGContext* InContext) const
 
 					auto ConstrainedString = GenerateWithConstraints(Context, Grammar, SplineData->GetLength(), Constraints);
 
+					// copy input data to output and add Grammar attribute
 					auto OutSplineData = SplineData->DuplicateData(InContext);
 					Outputs.Emplace_GetRef().Data = OutSplineData;
 					CreateOrOverwriteAttribute(InContext, OutSplineData->Metadata, Settings->OutGrammarAttribute, ConstrainedString);
@@ -150,38 +153,42 @@ bool FPCGConstrainGrammarElement::ExecuteInternal(FPCGContext* InContext) const
 
 			if (!Settings->bConstraintsAsInput)
 			{
-				//auto OutSegmentData = CopyPointDataToOutput(InContext, Outputs.Emplace_GetRef(), SegmentData);
+				// copy input data to output and add Grammar attribute
 				auto OutSegmentData = Cast<UPCGBasePointData>(SegmentData->DuplicateData(InContext));
 				Outputs.Emplace_GetRef().Data = OutSegmentData;
 				FPCGMetadataAttribute<FString>* GrammarAttribute = CreateOrOverwriteAttribute<FString>(InContext, OutSegmentData->Metadata, Settings->OutGrammarAttribute, "");
 
+				// iterate over all segments
 				for (int i = 0; i < OutSegmentData->GetNumPoints(); ++i)
 				{
 					auto Grammar = Settings->GrammarSelection.bGrammarAsAttribute ? GrammarStrings[i] : Settings->GrammarSelection.GrammarString;
 
 					auto ConstrainedString = GenerateWithConstraints(Context, Grammar, GetSegmentLength(SegmentData, i, Settings->SubdivisionAxis), Settings->Constraints);
+					// save the generated grammar to the output grammar attribute
 					GrammarAttribute->SetValue<FString>(OutSegmentData->GetMetadataEntry(i), ConstrainedString);
 				}
 			}
 			else
 			{
+				// if the constraints are provided through input pins, iterate over all constraint sets
 				TArray<FPCGTaggedData> ConstraintInputs = InContext->InputData.GetInputsByPin(PCGConstrainGrammar::Constants::ConstraintsPinLabel);
 				for (auto ConstraintInput : ConstraintInputs)
 				{
 					const UPCGBasePointData* ConstraintPointData = Cast<const UPCGBasePointData>(ConstraintInput.Data);
 
-					//auto OutSegmentData = CopyPointDataToOutput(InContext, Outputs.Emplace_GetRef(), SegmentData);
+					// copy input data to output and add Grammar attribute
 					auto OutSegmentData = Cast<UPCGBasePointData>(SegmentData->DuplicateData(InContext));
 					Outputs.Emplace_GetRef().Data = OutSegmentData;
 					FPCGMetadataAttribute<FString>* GrammarAttribute = CreateOrOverwriteAttribute<FString>(InContext, OutSegmentData->Metadata, Settings->OutGrammarAttribute, "");
 
+					// iterate over all segments
 					for (int i = 0; i < OutSegmentData->GetNumPoints(); ++i)
 					{
 						auto Constraints = GetConstraintsOnSegment(InContext, Settings, SegmentData, i, ConstraintPointData);
-
 						auto Grammar = Settings->GrammarSelection.bGrammarAsAttribute ? GrammarStrings[i] : Settings->GrammarSelection.GrammarString;
-						auto ConstrainedString = GenerateWithConstraints(Context, Grammar, GetSegmentLength(SegmentData, i, Settings->SubdivisionAxis), Constraints);
 
+						auto ConstrainedString = GenerateWithConstraints(Context, Grammar, GetSegmentLength(SegmentData, i, Settings->SubdivisionAxis), Constraints);
+						// save the generated grammar to the output grammar attribute
 						GrammarAttribute->SetValue<FString>(OutSegmentData->GetMetadataEntry(i), ConstrainedString);
 					}
 				}
@@ -212,15 +219,18 @@ FString FPCGConstrainGrammarElement::GenerateWithConstraints(FPCGGrammarConstrai
 	{
 		return GrammarString;
 	}
+	
+	Generator GrammarGenerator(Context->ModuleMap, Length, Context->ConstructedNFAs[GrammarString], GenerationConstraints);
+	
+	if (GrammarGenerator.wasGenerationSuccessful())
+		return StdToFString(GrammarGenerator.getGenerationResult().getGeneratedString());
 
-	auto result = Generator::generate(Context->ModuleMap, Length, Context->ConstructedNFAs[GrammarString], GenerationConstraints);
-
-	if (!result.isValid())
-	{
+	if (GrammarGenerator.getErrorInfo() == GenerationErrorType::UnknownLiteral)
+		PCGLog::LogErrorOnGraph(FText::Format(FText::FromString("The grammar '{0}' contains a symbol not listed in modules"), FText::FromString(GrammarString)), Context);
+	else
 		PCGLog::LogErrorOnGraph(FText::Format(FText::FromString("The given constraints could not be satisfied for grammar '{0}'"), FText::FromString(GrammarString)), Context);
-		return GrammarString;
-	}
-	return StdToFString(result.getGeneratedString());
+	
+	return GrammarString;
 }
 
 bool FPCGConstrainGrammarElement::MakeNFAForGrammar(FPCGGrammarConstrainingContext* InContext, const FString& GrammarString)
@@ -230,7 +240,10 @@ bool FPCGConstrainGrammarElement::MakeNFAForGrammar(FPCGGrammarConstrainingConte
 		const RegexParser Parser(FStringToStd(GrammarString));
 		if (!Parser.wasParsingSuccessful())
 		{
-			PCGLog::LogErrorOnGraph(FText::Format(FText::FromString("Grammar ({0}) could not be parsed."), FText::FromString(GrammarString)), InContext);
+			if (Parser.getErrorInfo() == RegexErrorType::EmptyString)
+				PCGLog::LogErrorOnGraph(FText::FromString("The provided grammar is empty."), InContext);
+			else
+				PCGLog::LogErrorOnGraph(FText::Format(FText::FromString("Grammar ({0}) could not be parsed."), FText::FromString(GrammarString)), InContext);
 			return false;
 		}
 
@@ -250,7 +263,6 @@ float FPCGConstrainGrammarElement::GetSegmentLength(const UPCGBasePointData* Seg
 {
 	const auto SegmentTransform = SegmentData->GetTransform(SegmentIndex);
 	const auto SegmentBounds = SegmentData->GetLocalBounds(SegmentIndex).TransformBy(SegmentTransform);
-	//auto Bounds = SegmentData->GetLocalBounds(SegmentIndex);
 	return GetVectorComponent(SegmentBounds.GetSize(), SubdivisionAxis);
 }
 
@@ -268,7 +280,7 @@ TArray<FPCGGrammarConstraint> FPCGConstrainGrammarElement::GetConstraintsOnSplin
 		if (!SamplePointOnSpline(SplineData->SplineStruct, ConstraintPointData->GetTransform(i), FBox(ConstraintPointData->GetBoundsMin(i), ConstraintPointData->GetBoundsMax(i)), PositionOnSpline))
 		{
 			PCGLog::LogWarningOnGraph(FText::Format(FText::FromString("Constraint symbol '{0}' is outside of the input shape, will be ignored."),
-													FText::FromString(Symbols[i])), InContext);
+			                                        FText::FromString(Symbols[i])), InContext);
 			continue;
 		}
 
@@ -290,7 +302,7 @@ float FPCGConstrainGrammarElement::GetDistanceAlongSpline(const FPCGSplineStruct
 	auto HigherBound = Spline.GetDistanceAlongSplineAtSplinePoint(ClosestSplinePointKey + 1);
 
 	auto DistanceEstimate = (LowerBound + HigherBound) * 0.5f;
-	
+
 	for (auto i = 0; i < Iterations; ++i)
 	{
 		auto MiddleInputKey = Spline.GetInputKeyAtDistanceAlongSpline(DistanceEstimate);
@@ -339,7 +351,7 @@ TArray<FPCGGrammarConstraint> FPCGConstrainGrammarElement::GetConstraintsOnSegme
 		if (!SegmentBounds.Intersect(ConstraintBounds))
 		{
 			PCGLog::LogWarningOnGraph(FText::Format(FText::FromString("Constraint symbol '{0}' is outside of the input shape, will be ignored."),
-													FText::FromString(Symbols[i])), InContext);
+			                                        FText::FromString(Symbols[i])), InContext);
 			continue;
 		}
 
@@ -357,7 +369,7 @@ TArray<FPCGConstrainedGrammarModule> FPCGConstrainGrammarElement::GetModules(FPC
 {
 	if (!InSettings->bModuleInfoAsInput)
 		return InSettings->ModulesInfo;
-	
+
 	const TArray<FPCGTaggedData> ModulesInfoInputs = InContext->InputData.GetInputsByPin(PCGSubdivisionBase::Constants::ModulesInfoPinLabel);
 
 	if (ModulesInfoInputs.IsEmpty())
@@ -365,7 +377,7 @@ TArray<FPCGConstrainedGrammarModule> FPCGConstrainGrammarElement::GetModules(FPC
 		PCGLog::LogWarningOnGraph(FText::FromString("No data was found on the module info pin."), InContext);
 		return {};
 	}
-	
+
 	const UPCGParamData* ParamData = Cast<UPCGParamData>(ModulesInfoInputs[0].Data);
 	if (!ParamData)
 	{
@@ -377,14 +389,15 @@ TArray<FPCGConstrainedGrammarModule> FPCGConstrainGrammarElement::GetModules(FPC
 	PropertyNameMapping.Emplace(GET_MEMBER_NAME_CHECKED(FPCGConstrainedGrammarModule, Symbol), {InSettings->ModulesInfoAttributeNames.SymbolAttributeName, /*bCanBeDefaulted=*/false});
 	PropertyNameMapping.Emplace(GET_MEMBER_NAME_CHECKED(FPCGConstrainedGrammarModule, Size), {InSettings->ModulesInfoAttributeNames.SizeAttributeName, /*bCanBeDefaulted=*/false});
 	PropertyNameMapping.Emplace(GET_MEMBER_NAME_CHECKED(FPCGConstrainedGrammarModule, bScalable), {
-									InSettings->ModulesInfoAttributeNames.ScalableAttributeName, /*bCanBeDefaulted=*/!InSettings->ModulesInfoAttributeNames.bProvideScalable
-								});
+		                            InSettings->ModulesInfoAttributeNames.ScalableAttributeName, /*bCanBeDefaulted=*/!InSettings->ModulesInfoAttributeNames.bProvideScalable
+	                            });
 	PropertyNameMapping.Emplace(GET_MEMBER_NAME_CHECKED(FPCGConstrainedGrammarModule, DebugColor), {
-									InSettings->ModulesInfoAttributeNames.DebugColorAttributeName, /*bCanBeDefaulted=*/!InSettings->ModulesInfoAttributeNames.bProvideDebugColor
-								});
+		                            InSettings->ModulesInfoAttributeNames.DebugColorAttributeName, /*bCanBeDefaulted=*/!InSettings->ModulesInfoAttributeNames.bProvideDebugColor
+	                            });
 	PropertyNameMapping.Emplace(GET_MEMBER_NAME_CHECKED(FPCGConstrainedGrammarModule, bSpawnOnlyWithConstraint), {
-									InSettings->ModulesInfoAttributeNames.SpawnOnlyWithConstraintAttributeName, /*bCanBeDefaulted=*/!InSettings->ModulesInfoAttributeNames.bProvideSpawnOnlyWithConstraint
-								});
+		                            InSettings->ModulesInfoAttributeNames.SpawnOnlyWithConstraintAttributeName, /*bCanBeDefaulted=*/
+		                            !InSettings->ModulesInfoAttributeNames.bProvideSpawnOnlyWithConstraint
+	                            });
 
 	return PCGPropertyHelpers::ExtractAttributeSetAsArrayOfStructs<FPCGConstrainedGrammarModule>(ParamData, &PropertyNameMapping, InContext);
 }
