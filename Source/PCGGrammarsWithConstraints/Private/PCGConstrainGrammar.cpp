@@ -89,6 +89,10 @@ bool FPCGConstrainGrammarElement::ExecuteInternal(FPCGContext* InContext) const
 			PCGLog::LogWarningOnGraph(FText::Format(PCGConstrainGrammar::Constants::DuplicatedSymbolText, FText::FromName(Module.Symbol)), InContext);
 			continue;
 		}
+		if (Module.Size <= 0){
+			PCGLog::LogWarningOnGraph(FText::Format(FText::FromString("Module {0} has size 0, will be ignored."), FText::FromName(Module.Symbol)), InContext);
+        	continue;
+		}
 		Context->ModuleMap.emplace(symbol, GrammarModule{symbol, static_cast<float>(Module.Size), Module.bSpawnOnlyWithConstraint});
 	}
 
