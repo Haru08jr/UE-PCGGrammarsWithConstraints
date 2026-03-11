@@ -72,6 +72,7 @@ bool FPCGConstrainGrammarElement::ExecuteInternal(FPCGContext* InContext) const
 
 	auto* Context = static_cast<FPCGGrammarConstrainingContext*>(InContext);
 	check(Context);
+	Context->bFallbackToGrammar = Settings->bFallbackToOriginalGrammar;
 
 	// Read and check modules
 	auto Modules = GetModules(InContext, Settings);
@@ -157,16 +158,21 @@ bool FPCGConstrainGrammarElement::ExecuteInternal(FPCGContext* InContext) const
 				auto OutSegmentData = Cast<UPCGBasePointData>(SegmentData->DuplicateData(InContext));
 				Outputs.Emplace_GetRef().Data = OutSegmentData;
 				FPCGMetadataAttribute<FString>* GrammarAttribute = CreateOrOverwriteAttribute<FString>(InContext, OutSegmentData->Metadata, Settings->OutGrammarAttribute, "");
-
-				// iterate over all segments
+				
+				// iterate over all segments and constrain the grammar
+				TArray<PCGMetadataEntryKey> ItemKeys;
+				TArray<FString> GeneratedStrings;
 				for (int i = 0; i < OutSegmentData->GetNumPoints(); ++i)
 				{
 					auto Grammar = Settings->GrammarSelection.bGrammarAsAttribute ? GrammarStrings[i] : Settings->GrammarSelection.GrammarString;
-
+					
 					auto ConstrainedString = GenerateWithConstraints(Context, Grammar, GetSegmentLength(SegmentData, i, Settings->SubdivisionAxis), Settings->Constraints);
-					// save the generated grammar to the output grammar attribute
-					GrammarAttribute->SetValue<FString>(OutSegmentData->GetMetadataEntry(i), ConstrainedString);
+					
+					ItemKeys.Add(OutSegmentData->GetMetadataEntry(i));
+					GeneratedStrings.Add(ConstrainedString);
 				}
+				// save the generated grammars to the output grammar attribute
+				GrammarAttribute->SetValues(ItemKeys, GeneratedStrings);
 			}
 			else
 			{
@@ -181,16 +187,21 @@ bool FPCGConstrainGrammarElement::ExecuteInternal(FPCGContext* InContext) const
 					Outputs.Emplace_GetRef().Data = OutSegmentData;
 					FPCGMetadataAttribute<FString>* GrammarAttribute = CreateOrOverwriteAttribute<FString>(InContext, OutSegmentData->Metadata, Settings->OutGrammarAttribute, "");
 
-					// iterate over all segments
+					// iterate over all segments and constrain the grammar
+					TArray<PCGMetadataEntryKey> ItemKeys;
+					TArray<FString> GeneratedStrings;
 					for (int i = 0; i < OutSegmentData->GetNumPoints(); ++i)
 					{
 						auto Constraints = GetConstraintsOnSegment(InContext, Settings, SegmentData, i, ConstraintPointData);
 						auto Grammar = Settings->GrammarSelection.bGrammarAsAttribute ? GrammarStrings[i] : Settings->GrammarSelection.GrammarString;
-
+						
 						auto ConstrainedString = GenerateWithConstraints(Context, Grammar, GetSegmentLength(SegmentData, i, Settings->SubdivisionAxis), Constraints);
-						// save the generated grammar to the output grammar attribute
-						GrammarAttribute->SetValue<FString>(OutSegmentData->GetMetadataEntry(i), ConstrainedString);
+					
+						ItemKeys.Add(OutSegmentData->GetMetadataEntry(i));
+						GeneratedStrings.Add(ConstrainedString);
 					}
+					// save the generated grammars to the output grammar attribute
+					GrammarAttribute->SetValues(ItemKeys, GeneratedStrings);
 				}
 			}
 		}
@@ -214,10 +225,15 @@ FString FPCGConstrainGrammarElement::GenerateWithConstraints(FPCGGrammarConstrai
 			GenerationConstraints.emplace_back(ConstraintSymbol, Constraint.Position, Constraint.bHasWidth ? Constraint.Width * 0.5f : 0.f);
 		}
 	}
+	if (GenerationConstraints.empty())
+	{
+		PCGLog::LogWarningOnGraph(FText::Format(FText::FromString("No constraints found for grammar '{0}'. Will return original string."),FText::FromString(GrammarString)), Context);
+		return GrammarString;
+	}
 
 	if (!MakeNFAForGrammar(Context, GrammarString))
 	{
-		return GrammarString;
+		return Context->bFallbackToGrammar ? GrammarString : "";
 	}
 	
 	Generator GrammarGenerator(Context->ModuleMap, Length, Context->ConstructedNFAs[GrammarString], GenerationConstraints);
@@ -230,7 +246,7 @@ FString FPCGConstrainGrammarElement::GenerateWithConstraints(FPCGGrammarConstrai
 	else
 		PCGLog::LogErrorOnGraph(FText::Format(FText::FromString("The given constraints could not be satisfied for grammar '{0}'"), FText::FromString(GrammarString)), Context);
 	
-	return GrammarString;
+	return Context->bFallbackToGrammar ? GrammarString : "";
 }
 
 bool FPCGConstrainGrammarElement::MakeNFAForGrammar(FPCGGrammarConstrainingContext* InContext, const FString& GrammarString)
