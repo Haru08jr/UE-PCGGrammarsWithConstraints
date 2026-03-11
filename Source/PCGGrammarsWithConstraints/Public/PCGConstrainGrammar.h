@@ -85,6 +85,10 @@ public:
 	/** Name of the grammar output attribute. */
 	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Settings", meta = (PCG_Overridable))
 	FName OutGrammarAttribute = TEXT("Grammar");
+	
+	/** Determines the behaviour in case no grammar could be generated. If false, leave the grammar output empty. */
+	UPROPERTY(BlueprintReadWrite, EditAnywhere, Category = "Settings", meta = (PCG_Overridable))
+	bool bFallbackToOriginalGrammar = true;
 };
 
 class FPCGConstrainGrammarElement : public IPCGElementWithCustomContext<FPCGGrammarConstrainingContext>

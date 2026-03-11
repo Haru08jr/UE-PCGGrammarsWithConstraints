@@ -92,4 +92,5 @@ struct FPCGGrammarConstrainingContext : public FPCGContext
 {
 	TMap<FString, NFA> ConstructedNFAs;
 	std::map<std::string, GrammarModule> ModuleMap;
+	bool bFallbackToGrammar = true;
 };
