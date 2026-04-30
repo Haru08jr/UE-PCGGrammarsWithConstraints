@@ -90,7 +90,9 @@ enum SubdivisionType
 
 struct FPCGGrammarConstrainingContext : public FPCGContext
 {
-	TMap<FString, NFA> ConstructedNFAs;
+	TMap<FString, EpsilonNFA> ConstructedNFAs;
 	std::map<std::string, GrammarModule> ModuleMap;
 	bool bFallbackToGrammar = true;
+	
+	std::set<std::string> GetModuleNameSet() const;
 };

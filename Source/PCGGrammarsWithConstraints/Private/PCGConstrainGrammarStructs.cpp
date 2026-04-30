@@ -2,3 +2,11 @@
 
 
 #include "PCGConstrainGrammarStructs.h"
+
+#include <ranges>
+
+std::set<std::string> FPCGGrammarConstrainingContext::GetModuleNameSet() const
+{
+	auto ModuleKeys = std::views::keys(ModuleMap);
+	return {ModuleKeys.begin(), ModuleKeys.end()};
+}

@@ -241,11 +241,7 @@ FString FPCGConstrainGrammarElement::GenerateWithConstraints(FPCGGrammarConstrai
 	if (GrammarGenerator.wasGenerationSuccessful())
 		return StdToFString(GrammarGenerator.getGenerationResult().getGeneratedString());
 
-	if (GrammarGenerator.getErrorInfo() == GenerationErrorType::UnknownLiteral)
-		PCGLog::LogErrorOnGraph(FText::Format(FText::FromString("The grammar '{0}' contains a symbol not listed in modules"), FText::FromString(GrammarString)), Context);
-	else
-		PCGLog::LogErrorOnGraph(FText::Format(FText::FromString("The given constraints could not be satisfied for grammar '{0}'"), FText::FromString(GrammarString)), Context);
-	
+	PCGLog::LogErrorOnGraph(FText::Format(FText::FromString("The given constraints could not be satisfied for grammar '{0}'"), FText::FromString(GrammarString)), Context);
 	return Context->bFallbackToGrammar ? GrammarString : "";
 }
 
@@ -253,11 +249,14 @@ bool FPCGConstrainGrammarElement::MakeNFAForGrammar(FPCGGrammarConstrainingConte
 {
 	if (!InContext->ConstructedNFAs.Contains(GrammarString))
 	{
-		const RegexParser Parser(FStringToStd(GrammarString));
+		const RegexParser Parser(FStringToStd(GrammarString), InContext->GetModuleNameSet());
 		if (!Parser.wasParsingSuccessful())
 		{
 			if (Parser.getErrorInfo() == RegexErrorType::EmptyString)
 				PCGLog::LogErrorOnGraph(FText::FromString("The provided grammar is empty."), InContext);
+			else if (Parser.getErrorInfo() == RegexErrorType::UnknownLiteral)
+				PCGLog::LogErrorOnGraph(FText::Format(FText::FromString("The grammar ({0}) contains a module that is not in the module list."), 
+					FText::FromString(GrammarString)), InContext);
 			else
 				PCGLog::LogErrorOnGraph(FText::Format(FText::FromString("Grammar ({0}) could not be parsed."), FText::FromString(GrammarString)), InContext);
 			return false;
